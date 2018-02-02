@@ -53,6 +53,8 @@ export default {
             return;
         }
 
+        const dim = view.mainLoop.gfxEngine.getWindowSize();
+
         // enable picking mode for points material
         layer.object3d.traverse((o) => {
             if (o.isPoints && o.baseId) {
@@ -64,7 +66,7 @@ export default {
         // TODO: support more than 1 pixel selection
         const buffer = view.mainLoop.gfxEngine.renderViewTobuffer(
                 view, view.mainLoop.gfxEngine.fullSizeRenderTarget,
-                mouse.x, mouse.y, 1, 1);
+                mouse.x, dim.y - mouse.y, 1, 1);
 
         // see PointCloudProvider and the construction of unique_id
         const objId = (buffer[0] << 8) | buffer[1];

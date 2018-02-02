@@ -130,6 +130,51 @@ function loadPointFile(layer, url) {
     });
 }
 
+function pick(view, mouse, layer) {
+    if (!layer.root) {
+        return;
+    }
+
+    // enable picking mode for points material
+    layer.object3d.traverse((o) => {
+        if (o.isPoints && o.baseId) {
+            o.material.enablePicking(true);
+        }
+    });
+
+    // render 1 pixel
+    // TODO: support more than 1 pixel selection
+    const buffer = view.mainLoop.gfxEngine.renderViewTobuffer(
+            view, view.mainLoop.gfxEngine.fullSizeRenderTarget,
+            mouse.x, mouse.y, 1, 1);
+
+    // see PointCloudProvider and the construction of unique_id
+    const objId = (buffer[0] << 8) | buffer[1];
+    const index = (buffer[2] << 8) | buffer[3];
+
+    let result;
+    layer.object3d.traverse((o) => {
+        if (o.isPoints && o.baseId) {
+            // disable picking mode
+            o.material.enablePicking(false);
+
+            // if baseId matches objId, the clicked point belongs to `o`
+            if (!result && o.baseId === objId) {
+                result = {
+                    object: o,
+                    index,
+                };
+            }
+        }
+    });
+
+    if (result) {
+        return [result];
+    } else {
+        return [];
+    }
+}
+
 export default {
     preprocessDataLayer(layer) {
         if (!layer.file) {
@@ -160,6 +205,7 @@ export default {
         layer.update = PointCloudProcessing.update;
         layer.postUpdate = PointCloudProcessing.postUpdate;
 
+        layer.pickObjectsAt = (view, mouse) => pick(view, mouse, layer);
 
         return Fetcher.json(`${layer.url}/${layer.file}`, layer.fetchOptions).then((cloud) => {
             layer.metadata = cloud;

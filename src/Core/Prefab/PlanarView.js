@@ -3,7 +3,6 @@ import * as THREE from 'three';
 import View from '../View';
 import { RENDERING_PAUSED } from '../MainLoop';
 import RendererConstant from '../../Renderer/RendererConstant';
-import { unpack1K } from '../../Renderer/LayeredMaterial';
 
 import { GeometryLayer } from '../Layer/Layer';
 
@@ -166,7 +165,8 @@ PlanarView.prototype.addLayer = function addLayer(layer) {
 };
 
 PlanarView.prototype.selectNodeAt = function selectNodeAt(mouse) {
-    const selectedId = this.screenCoordsToNodeId(mouse);
+    const picked = this.tileLayer.pickObjectsAt(this, mouse);
+    const selectedId = picked.length ? picked[0].object.id : undefined;
 
     for (const n of this.tileLayer.level0Nodes) {
         n.traverse((node) => {
@@ -182,37 +182,16 @@ PlanarView.prototype.selectNodeAt = function selectNodeAt(mouse) {
         });
     }
 
-    this.notifyChange();
+    this.notifyChange(true);
 };
 
-PlanarView.prototype.screenCoordsToNodeId = function screenCoordsToNodeId(mouse) {
-    const dim = this.mainLoop.gfxEngine.getWindowSize();
-
-    const previousRenderState = this._renderState;
-    this.changeRenderState(RendererConstant.ID);
-
-    var buffer = this.mainLoop.gfxEngine.renderViewTobuffer(
-        this,
-        this.mainLoop.gfxEngine.fullSizeRenderTarget,
-        mouse.x, dim.y - mouse.y,
-        1, 1);
-
-    this.changeRenderState(previousRenderState);
-
-    var depthRGBA = new THREE.Vector4().fromArray(buffer).divideScalar(255.0);
-
-    // unpack RGBA to float
-    var unpack = unpack1K(depthRGBA, Math.pow(256, 3));
-
-    return Math.round(unpack);
-};
 
 PlanarView.prototype.readDepthBuffer = function readDepthBuffer(x, y, width, height) {
     const g = this.mainLoop.gfxEngine;
     const previousRenderState = this._renderState;
-    this.changeRenderState(RendererConstant.DEPTH);
+    this.tileLayer.changeRenderState(RendererConstant.DEPTH);
     const buffer = g.renderViewTobuffer(this, g.fullSizeRenderTarget, x, y, width, height);
-    this.changeRenderState(previousRenderState);
+    this.tileLayer.changeRenderState(previousRenderState);
     return buffer;
 };
 
@@ -275,26 +254,6 @@ PlanarView.prototype.getPickingPositionFromDepth = function getPickingPositionFr
         { return undefined; }
 
     return pickWorldPosition;
-};
-
-PlanarView.prototype.changeRenderState = function changeRenderState(newRenderState) {
-    if (this._renderState == newRenderState || !this.tileLayer.level0Nodes) {
-        return;
-    }
-
-    // build traverse function
-    var changeStateFunction = (function getChangeStateFunctionFn() {
-        return function changeStateFunction(object3D) {
-            if (object3D.changeState) {
-                object3D.changeState(newRenderState);
-            }
-        };
-    }());
-
-    for (const n of this.tileLayer.level0Nodes) {
-        n.traverseVisible(changeStateFunction);
-    }
-    this._renderState = newRenderState;
 };
 
 export default PlanarView;

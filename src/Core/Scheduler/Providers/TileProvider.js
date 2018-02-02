@@ -10,7 +10,7 @@ import TileMesh from '../../TileMesh';
 import CancelledCommandException from '../CancelledCommandException';
 import { requestNewTile } from '../../../Process/TiledNodeProcessing';
 import RendererConstant from '../../../Renderer/RendererConstant';
-import { unpack1K } from '../../../Renderer/LayeredMaterial';
+import Picking from '../../Picking';
 
 function changeRenderState(tileLayer) {
     let _renderState = RendererConstant.FINAL;
@@ -35,34 +35,6 @@ function changeRenderState(tileLayer) {
     };
 }
 
-function screenCoordsToNodeId(view, tileLayer, mouse) {
-    const dim = view.mainLoop.gfxEngine.getWindowSize();
-
-    mouse = mouse || new THREE.Vector2(Math.floor(dim.x / 2), Math.floor(dim.y / 2));
-
-    const previousRenderState = tileLayer.changeRenderState(RendererConstant.ID);
-
-    // Prepare state
-    const prev = view.camera.camera3D.layers.mask;
-    view.camera.camera3D.layers.mask = 1 << tileLayer.threejsLayer;
-
-    var buffer = view.mainLoop.gfxEngine.renderViewTobuffer(
-        view,
-        view.mainLoop.gfxEngine.fullSizeRenderTarget,
-        mouse.x, dim.y - mouse.y,
-        1, 1);
-
-    tileLayer.changeRenderState(previousRenderState);
-    view.camera.camera3D.layers.mask = prev;
-
-    var depthRGBA = new THREE.Vector4().fromArray(buffer).divideScalar(255.0);
-
-    // unpack RGBA to float
-    var unpack = unpack1K(depthRGBA, Math.pow(256, 3));
-
-    return Math.round(unpack);
-}
-
 function TileProvider() {
     Provider.call(this, null);
     this.cacheGeometry = new Map();
@@ -81,18 +53,7 @@ TileProvider.prototype.preprocessDataLayer = function preprocessLayer(layer, vie
     layer.onTileCreated = layer.onTileCreated || (() => {});
     layer.changeRenderState = changeRenderState(layer);
     // provide custom pick function
-    layer.pickObjectsAt = (_view, mouse) => {
-        const results = [];
-        const _id = screenCoordsToNodeId(_view, layer, mouse);
-        for (const n of layer.level0Nodes) {
-            n.traverse((node) => {
-                if (node.id === _id && node instanceof TileMesh) {
-                    results.push({ object: node });
-                }
-            });
-        }
-        return results;
-    };
+    layer.pickObjectsAt = (_view, mouse) => Picking.pickTilesAt(_view, mouse, layer);
 
     const promises = [];
 

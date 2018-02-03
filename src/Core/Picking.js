@@ -9,7 +9,7 @@ function screenCoordsToNodeId(view, tileLayer, mouse) {
 
     mouse = mouse || new THREE.Vector2(Math.floor(dim.x / 2), Math.floor(dim.y / 2));
 
-    const previousRenderState = tileLayer.changeRenderState(RendererConstant.ID);
+    const restore = tileLayer.level0Nodes.map(n => n.pushRenderState(RendererConstant.ID));
 
     // Prepare state
     const prev = view.camera.camera3D.layers.mask;
@@ -21,7 +21,8 @@ function screenCoordsToNodeId(view, tileLayer, mouse) {
         mouse.x, dim.y - mouse.y,
         1, 1);
 
-    tileLayer.changeRenderState(previousRenderState);
+    restore.forEach(r => r());
+
     view.camera.camera3D.layers.mask = prev;
 
     var depthRGBA = new THREE.Vector4().fromArray(buffer).divideScalar(255.0);

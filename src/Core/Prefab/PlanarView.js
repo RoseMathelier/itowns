@@ -11,6 +11,7 @@ import { updateLayeredMaterialNodeImagery, updateLayeredMaterialNodeElevation } 
 import { planarCulling, planarSubdivisionControl, prePlanarUpdate } from '../../Process/PlanarTileProcessing';
 import PlanarTileBuilder from './Planar/PlanarTileBuilder';
 import SubdivisionControl from '../../Process/SubdivisionControl';
+import Picking from '../Picking';
 
 export function createPlanarLayer(id, extent, options) {
     const tileLayer = new GeometryLayer(id, options.object3d || new THREE.Group());
@@ -115,6 +116,8 @@ export function createPlanarLayer(id, extent, options) {
         enable: false,
         position: { x: -0.5, y: 0.0, z: 1.0 },
     };
+    // provide custom pick function
+    tileLayer.pickObjectsAt = (_view, mouse) => Picking.pickTilesAt(_view, mouse, tileLayer);
 
     return tileLayer;
 }
@@ -188,10 +191,9 @@ PlanarView.prototype.selectNodeAt = function selectNodeAt(mouse) {
 
 PlanarView.prototype.readDepthBuffer = function readDepthBuffer(x, y, width, height) {
     const g = this.mainLoop.gfxEngine;
-    const previousRenderState = this._renderState;
-    this.tileLayer.changeRenderState(RendererConstant.DEPTH);
+    const restoreState = this.tileLayer.level0Nodes[0].pushRenderState(RendererConstant.DEPTH);
     const buffer = g.renderViewTobuffer(this, g.fullSizeRenderTarget, x, y, width, height);
-    this.tileLayer.changeRenderState(previousRenderState);
+    restoreState();
     return buffer;
 };
 

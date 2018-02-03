@@ -9,31 +9,6 @@ import TileGeometry from '../../TileGeometry';
 import TileMesh from '../../TileMesh';
 import CancelledCommandException from '../CancelledCommandException';
 import { requestNewTile } from '../../../Process/TiledNodeProcessing';
-import RendererConstant from '../../../Renderer/RendererConstant';
-import Picking from '../../Picking';
-
-function changeRenderState(tileLayer) {
-    let _renderState = RendererConstant.FINAL;
-    return function _changeRenderState(newRenderState) {
-        if (_renderState == newRenderState || !tileLayer.level0Nodes) {
-            return;
-        }
-
-        // build traverse function
-        var changeStateFunction = (function getChangeStateFunctionFn() {
-            return function changeStateFunction(object3D) {
-                if (object3D.changeState) {
-                    object3D.changeState(newRenderState);
-                }
-            };
-        }());
-
-        for (const n of tileLayer.level0Nodes) {
-            n.traverseVisible(changeStateFunction);
-        }
-        _renderState = newRenderState;
-    };
-}
 
 function TileProvider() {
     Provider.call(this, null);
@@ -51,9 +26,6 @@ TileProvider.prototype.preprocessDataLayer = function preprocessLayer(layer, vie
 
     layer.level0Nodes = [];
     layer.onTileCreated = layer.onTileCreated || (() => {});
-    layer.changeRenderState = changeRenderState(layer);
-    // provide custom pick function
-    layer.pickObjectsAt = (_view, mouse) => Picking.pickTilesAt(_view, mouse, layer);
 
     const promises = [];
 

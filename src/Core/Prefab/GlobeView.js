@@ -17,6 +17,7 @@ import { updateLayeredMaterialNodeImagery, updateLayeredMaterialNodeElevation } 
 import { globeCulling, preGlobeUpdate, globeSubdivisionControl, globeSchemeTileWMTS, globeSchemeTile1 } from '../../Process/GlobeTileProcessing';
 import BuilderEllipsoidTile from './Globe/BuilderEllipsoidTile';
 import SubdivisionControl from '../../Process/SubdivisionControl';
+import Picking from '../Picking';
 
 /**
  * Fires when the view is completely loaded. Controls and view's functions can be called then.
@@ -174,6 +175,8 @@ export function createGlobeLayer(id, options) {
         enable: false,
         position: { x: -0.5, y: 0.0, z: 1.0 },
     };
+    // provide custom pick function
+    wgs84TileLayer.pickObjectsAt = (_view, mouse) => Picking.pickTilesAt(_view, mouse, wgs84TileLayer);
 
     return wgs84TileLayer;
 }
@@ -372,10 +375,10 @@ GlobeView.prototype.selectNodeAt = function selectNodeAt(mouse) {
 
 GlobeView.prototype.readDepthBuffer = function readDepthBuffer(x, y, width, height) {
     const g = this.mainLoop.gfxEngine;
-    const previousRenderState = this._renderState;
-    this.wgs84TileLayer.changeRenderState(RendererConstant.DEPTH);
+    const restore = this.wgs84TileLayer.level0Nodes.map(n => n.pushRenderState(RendererConstant.DEPTH));
     const buffer = g.renderViewTobuffer(this, g.fullSizeRenderTarget, x, y, width, height);
-    this.wgs84TileLayer.changeRenderState(previousRenderState);
+    restore.forEach(r => r());
+
     return buffer;
 };
 

@@ -33,6 +33,8 @@ function screenCoordsToNodeId(view, tileLayer, mouse) {
     return Math.round(unpack);
 }
 
+const raycaster = new THREE.Raycaster();
+
 export default {
     pickTilesAt: (_view, mouse, layer) => {
         const results = [];
@@ -94,5 +96,23 @@ export default {
         } else {
             return [];
         }
+    },
+
+    /*
+     * Default picking method. Uses THREE.Raycaster
+     */
+    pickObjectsAt(mouse, camera, object, target = []) {
+        // raycaster use NDC coordinate
+        const ndc = {
+            x: 2 * (mouse.x / camera.width) - 1,
+            y: -2 * (mouse.y / camera.height) + 1,
+        };
+        raycaster.setFromCamera(ndc, camera.camera3D);
+        const intersects = raycaster.intersectObject(object, true);
+        for (const inter of intersects) {
+            target.push(inter);
+        }
+
+        return target;
     },
 };

@@ -1,11 +1,12 @@
 /* global window */
-import { Scene, EventDispatcher, Vector2, Raycaster, Object3D } from 'three';
+import { Scene, EventDispatcher, Vector2, Object3D } from 'three';
 import Camera from '../Renderer/Camera';
 import MainLoop from './MainLoop';
 import c3DEngine from '../Renderer/c3DEngine';
 import { STRATEGY_MIN_NETWORK_TRAFFIC } from './Layer/LayerUpdateStrategy';
 import { GeometryLayer, Layer, defineLayerProperty } from './Layer/Layer';
 import Scheduler from './Scheduler/Scheduler';
+import Picking from './Picking';
 
 /**
  * Constructs an Itowns View instance
@@ -509,19 +510,6 @@ View.prototype.normalizedToViewCoords = function normalizedToViewCoords(ndcCoord
     return _eventCoords;
 };
 
-function _raycastObjectsAt(raycaster, mouse, camera, object, target) {
-    // raycaster use NDC coordinate
-    const ndc = {
-        x: 2 * (mouse.x / camera.width) - 1,
-        y: -2 * (mouse.y / camera.height) + 1,
-    };
-    raycaster.setFromCamera(ndc, camera.camera3D);
-    const intersects = raycaster.intersectObject(object, true);
-    for (const inter of intersects) {
-        target.push(inter);
-    }
-}
-
 /**
  * Return objects from some layers/objects3d under the mouse in this view.
  *
@@ -555,7 +543,6 @@ View.prototype.pickObjectsAt = function pickObjectsAt(mouse, ...where) {
         }
     }
 
-    this._raycaster = this._raycaster || new Raycaster();
     for (let i = 0; i < source.length; i++) {
         if (source[i].type === 'geometry') {
             // does this layer have a custom picking function?
@@ -563,14 +550,6 @@ View.prototype.pickObjectsAt = function pickObjectsAt(mouse, ...where) {
                 results.splice(
                     results.length, 0,
                     ...source[i].pickObjectsAt(this, mouse));
-            } else if (source[i].object3d) {
-                //   - source[i] has an object3d property
-                _raycastObjectsAt(
-                    this._raycaster,
-                    mouse,
-                    this.camera,
-                    source[i].object3d,
-                    results);
             } else {
                 //   - it hasn't: this layer is attached to another one
                 let parentLayer;
@@ -582,8 +561,7 @@ View.prototype.pickObjectsAt = function pickObjectsAt(mouse, ...where) {
 
                 const obj = [];
                 // raycast using parent layer object3d
-                _raycastObjectsAt(
-                    this._raycaster,
+                Picking.pickObjectsAt(
                     mouse,
                     this.camera,
                     parentLayer.object3d,
@@ -597,12 +575,11 @@ View.prototype.pickObjectsAt = function pickObjectsAt(mouse, ...where) {
                 }
             }
         } else if (source[i] instanceof Object3D) {
-            _raycastObjectsAt(
-                    this._raycaster,
-                    mouse,
-                    this.camera,
-                    source[i],
-                    results);
+            Picking.pickObjectsAt(
+                mouse,
+                this.camera,
+                source[i],
+                results);
         } else {
             throw new Error(`Invalid where arg (value = ${where}). Expected layers, layer ids or Object3Ds`);
         }

@@ -89,4 +89,5 @@ function showPointcloud(serverUrl, fileName, lopocsTable) {
     }
 
     view.addLayer(pointcloud).then(onLayerReady);
+    hideLoadingScreenWhenReady(view, document.getElementById('itowns-loader'));
 }

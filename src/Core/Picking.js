@@ -33,6 +33,15 @@ function screenCoordsToNodeId(view, tileLayer, mouse) {
     return Math.round(unpack);
 }
 
+function findLayerIdInParent(obj) {
+    if (obj.layer) {
+        return obj.layer;
+    }
+    if (obj.parent) {
+        return findLayerIdInParent(obj.parent);
+    }
+}
+
 const raycaster = new THREE.Raycaster();
 
 export default {
@@ -42,7 +51,10 @@ export default {
 
         const extractResult = (node) => {
             if (node.id === _id && node instanceof TileMesh) {
-                results.push({ object: node });
+                results.push({
+                    object: node,
+                    layer: layer.id,
+                });
             }
         };
         for (const n of layer.level0Nodes) {
@@ -86,6 +98,7 @@ export default {
                     result = {
                         object: o,
                         index,
+                        layer: layer.id,
                     };
                 }
             }
@@ -110,6 +123,7 @@ export default {
         raycaster.setFromCamera(ndc, camera.camera3D);
         const intersects = raycaster.intersectObject(object, true);
         for (const inter of intersects) {
+            inter.layer = findLayerIdInParent(inter.object);
             target.push(inter);
         }
 

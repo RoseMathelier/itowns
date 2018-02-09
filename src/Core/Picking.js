@@ -3,6 +3,31 @@ import TileMesh from './TileMesh';
 import RendererConstant from '../Renderer/RendererConstant';
 import { unpack1K } from '../Renderer/LayeredMaterial';
 
+const fakeScene = new THREE.Scene();
+
+function hideEverythingElse(view, object, threejsLayer = 0) {
+    // We want to render only 'object' and its hierarchy.
+    // So we:
+    //    - place it in a fake scene
+    //    - if it uses threejsLayer defined -> force it on the camera
+    //      (or use the default one: 0)
+    const oldParent = object.parent;
+    const oldScene = view.scene;
+    const prev = view.camera.camera3D.layers.mask;
+
+    fakeScene.add(object);
+
+    view.scene = fakeScene;
+
+    view.camera.camera3D.layers.mask = 1 << threejsLayer;
+
+    return () => {
+        view.scene = oldScene;
+        oldParent.add(object);
+        view.camera.camera3D.layers.mask = prev;
+    };
+}
+
 // TileMesh picking support function
 function screenCoordsToNodeId(view, tileLayer, mouse) {
     const dim = view.mainLoop.gfxEngine.getWindowSize();
@@ -11,9 +36,7 @@ function screenCoordsToNodeId(view, tileLayer, mouse) {
 
     const restore = tileLayer.level0Nodes.map(n => n.pushRenderState(RendererConstant.ID));
 
-    // Prepare state
-    const prev = view.camera.camera3D.layers.mask;
-    view.camera.camera3D.layers.mask = 1 << tileLayer.threejsLayer;
+    const undoHide = hideEverythingElse(view, tileLayer.object3d, tileLayer.threejsLayer);
 
     var buffer = view.mainLoop.gfxEngine.renderViewTobuffer(
         view,
@@ -21,9 +44,9 @@ function screenCoordsToNodeId(view, tileLayer, mouse) {
         mouse.x, dim.y - mouse.y,
         1, 1);
 
-    restore.forEach(r => r());
+    undoHide();
 
-    view.camera.camera3D.layers.mask = prev;
+    restore.forEach(r => r());
 
     var depthRGBA = new THREE.Vector4().fromArray(buffer).divideScalar(255.0);
 
@@ -77,11 +100,15 @@ export default {
             }
         });
 
+        const undoHide = hideEverythingElse(view, layer.object3d, layer.threejsLayer);
+
         // render 1 pixel
         // TODO: support more than 1 pixel selection
         const buffer = view.mainLoop.gfxEngine.renderViewTobuffer(
                 view, view.mainLoop.gfxEngine.fullSizeRenderTarget,
                 mouse.x, dim.y - mouse.y, 1, 1);
+
+        undoHide();
 
         // see PointCloudProvider and the construction of unique_id
         const objId = (buffer[0] << 8) | buffer[1];

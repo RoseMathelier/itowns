@@ -3,17 +3,19 @@
 // eslint-disable-next-line no-unused-vars
 
 // This connects to rosbridge server socket and show its messages (Pointclouds2, ...)
-function showRosData(serverUrl, topicName, messageType) {
+
 
     console.log("showRosData");
-    var ros;
+    //var ros;
     var pointclouds = [];
     var oldPostUpdate;
     var viewerDiv;
     var debugGui;
     var view;
     var controls;
-    var cameraPositioned = false; 
+    var cameraPositioned = false;
+    var listCoords = [];
+    var lineId = 0;
 
     viewerDiv = document.getElementById('viewerDiv');
     viewerDiv.style.display = 'block';
@@ -30,22 +32,6 @@ function showRosData(serverUrl, topicName, messageType) {
     view.mainLoop.gfxEngine.renderer.setClearColor(0x555555);
     controls = new itowns.FlyControls(view, { focusOnClick: true });
 
-    // Configure ros provider
-    var ros = new ROSLIB.Ros({
-              url : serverUrl
-            });
-
-    ros.on('connection', function() {
-        console.log('Connected to websocket server.');
-    });
-    
-    ros.on('error', function(error) {
-        console.log('Error connecting to websocket server: ', error);
-    });
-    
-    ros.on('close', function() {
-        console.log('Connection to websocket server closed.');
-    });
 
     /*
     var cmdVel = new ROSLIB.Topic({
@@ -68,21 +54,13 @@ function showRosData(serverUrl, topicName, messageType) {
     });
     cmdVel.publish(twist);
     */
-  
 
-    var listener = new ROSLIB.Topic({
+
+    /*var listener = new ROSLIB.Topic({
         ros : ros,
         name : topicName,
         messageType : messageType
-    });
-    
-    listener.subscribe(function(message) {
-        console.log('Received message on ', listener.name , ': ' , message);
-
-        switch(messageType){
-            case 'sensor_msgs/PointCloud2': handlePointCloud2(message); break;
-        }
-    });
+    });*/
 
 
     function loadPoints() {
@@ -114,7 +92,7 @@ function showRosData(serverUrl, topicName, messageType) {
         geometry.addAttribute( 'position', new itowns.THREE.BufferAttribute( positions, 3 ) );
         geometry.addAttribute( 'color', new itowns.THREE.BufferAttribute( colors, 3 ) );
         geometry.computeBoundingSphere();
-        
+
         var material = new itowns.THREE.PointsMaterial( { transparent:true, opacity: 0, size: 1, vertexColors: itowns.THREE.VertexColors } );
         points = new itowns.THREE.Points( geometry, material );
         points.scale.set(0.5,0.5,0.5);
@@ -126,6 +104,78 @@ function showRosData(serverUrl, topicName, messageType) {
 
    // loadPoints();
     animateNewDataReceived();
+
+    function handleTF(message){
+      console.log("0 " + message);
+      console.log("1 " + message.transforms);
+      console.log("2 " + message.transforms.translation);
+      var translation = message.transforms.transform.translation;
+      var rotation = message.transforms.transform.rotation;
+      console.log("Translation : X = " + translation.x + ", Y = " + translation.y, ", Z = " + translation.z);
+      console.log("Rotation : X = " + rotation.x + ", Y = " + rotation.y + ", Z = " + rotation.z + ", W = " + rotation.w);
+    }
+
+    function handleNavSatFix(message){
+
+  		// Data registration
+  		var coords = {'latitude':message.latitude, 'longitude':message.longitude, 'altitude':message.altitude};
+  		var state = message.status;
+  		var nameLin = "line" + lineId;
+
+  		// We test the GPS quality
+  		if(state.status === 0 ){
+  			listCoords.push(coords);
+  		}
+
+  		// We test if there are enough points to create a polyline
+  		if(listCoords.length > 1){
+
+  			var points3D = new THREE.Geometry();
+  			points3D.vertices.push(
+  			  new THREE.Vector3(listCoords[0].latitude, listCoords[0].longitude, listCoords[0].altitude),
+  			  new THREE.Vector3(listCoords[1].latitude, listCoords[1].longitude, listCoords[1].altitude)
+  			);
+  			var line = new THREE.Line(points3D, new THREE.LineBasicMaterial({color: "red"}));
+
+  			line.name = nameLin;
+
+  			view.scene.add(line);
+  		}
+
+      /*
+  		if(lineId > 10){
+  			nameRem = "line"+ (lineId-10);
+  			removeEntity(nameRem);
+  		}
+      */
+
+  		if(listCoords.length > 1){
+  			listCoords.shift();
+  		}
+
+  		lineId++;
+
+      /*
+  		// Data positionning
+      var geometry = new itowns.THREE.SphereGeometry( 0.5, 8, 8 );
+      var material = new itowns.THREE.MeshBasicMaterial( {wireframe: true, color: 0xffff00, side: itowns.THREE.DoubleSide} );
+      var sphere = new itowns.THREE.Mesh( geometry, material );
+
+      view.scene.add( sphere );
+      */
+
+      view.camera.camera3D.fov = 80;
+
+      //Camera
+      var firstPointPos = new THREE.Vector3(listCoords[0].latitude, listCoords[0].longitude, listCoords[0].altitude);
+      placeCamera(firstPointPos.clone().add(new itowns.THREE.Vector3(10,10,10)), firstPointPos);
+
+	  }
+
+    function removeEntity(name) {
+		    var selectedObject = view.scene.getObjectByName(name);
+		    view.scene.remove( selectedObject );
+	  }
 
     function handlePointCloud2(message){
 
@@ -162,13 +212,13 @@ function showRosData(serverUrl, topicName, messageType) {
 
             var intensity = 50; //float64View[rIdx+5]/50;
             var hsl = "hsl(" + intensity + ", 100%, 50%)";
-            var color = new itowns.THREE.Color(hsl); 
-            
+            var color = new itowns.THREE.Color(hsl);
+
             colors[pIdx+0] = color.r; //float32view[rIdx+] / 50.;
             colors[pIdx+1] = color.g; //float32view[rIdx+7] / 50.;
             colors[pIdx+2] = color.b; //float32view[rIdx+8] / 50.;
         }
-        console.log(colors);
+
         geometry.addAttribute( 'position', new itowns.THREE.BufferAttribute( positions, 3 ) );
         geometry.addAttribute( 'color', new itowns.THREE.BufferAttribute( colors, 3 ) );
         geometry.computeBoundingSphere();
@@ -178,7 +228,6 @@ function showRosData(serverUrl, topicName, messageType) {
         points.frustumCulled = false;
         points.scale.set(0.91,1.,1.);
         points.updateMatrixWorld();
-        //console.log(points);
 
 
         pointclouds.push(points);
@@ -190,15 +239,15 @@ function showRosData(serverUrl, topicName, messageType) {
         var sphere = new itowns.THREE.Mesh( geometry, material );
 
         view.scene.add( sphere );
-            
+
         view.camera.camera3D.fov = 80;
 
         if(!cameraPositioned) {
             cameraPositioned = true;
-            var firstPointPos = new itowns.THREE.Vector3().fromArray(positions);    
+            var firstPointPos = new itowns.THREE.Vector3().fromArray(positions);
                 placeCamera(firstPointPos.clone().add(new itowns.THREE.Vector3(10,10,10)), firstPointPos);
         }
-        
+
     }
 
 
@@ -224,9 +273,7 @@ function showRosData(serverUrl, topicName, messageType) {
                 p.updateMatrixWorld(true);
             }
             if(p.material.opacity < 0.5) p.material.opacity += 0.005;
-            
+
         }
         view.notifyChange(true);
     }
-
-}

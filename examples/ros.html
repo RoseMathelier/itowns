@@ -22,7 +22,7 @@
                 padding: 0;
                 display: none;
             }
-            
+
         </style>
 
         <meta charset="UTF-8">
@@ -38,14 +38,96 @@
             <script src="GUI/dat.gui/dat.gui.min.js"></script>
             <script src="../dist/itowns.js"></script>
             <script src="../dist/debug.js"></script>
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/EventEmitter/5.2.4/EventEmitter.min.js"></script>
+            <script>
+              var THREE = itowns.THREE;
+            </script>
+            <script src="https://cdn.jsdelivr.net/npm/eventemitter2@5.0.1/lib/eventemitter2.min.js"></script>
             <script src="https://cdnjs.cloudflare.com/ajax/libs/roslibjs/0.20.0/roslib.min.js"></script>
+            <script src="http://static.robotwebtools.org/ros3djs/current/ros3d.min.js"></script>
             <script src="./ros.js"></script>
 
             <script type="text/javascript">
+
+                //ROS initialization
+                var ros = new ROSLIB.Ros({
+                          url : 'ws://localhost:9090/'
+                        });
+
+                ros.on('connection', function() {
+                    console.log('Connected to websocket server.');
+                });
+
+                ros.on('error', function(error) {
+                    console.log('Error connecting to websocket server: ', error);
+                });
+
+                ros.on('close', function() {
+                    console.log('Connection to websocket server closed.');
+                });
+
+                //Get the available topics
+                ros.getTopics(handleTopics);
+
+                //GUI interface : topic displayed
+                var gui = new dat.GUI();
+                var object = {};
+
+                function handleTopics(json){
+
+                  //Get all the available types
+                  var listTypes = [];
+                  json.types.forEach(elmt => {
+                    if(listTypes.indexOf(elmt) == -1){
+                      listTypes.push(elmt);
+                    }
+                  });
+
+                  //Add folders
+                  listTypes.sort();
+                  var folders = {};
+                  listTypes.forEach(type => {
+                    folders[type] = gui.addFolder(type);
+                  });
+
+                  //Put each topic in the right folder
+                  var params = {};
+                  var type;
+                  var controllers = {};
+                  json.topics.forEach((topicName, index) => {
+                    type = json.types[index];
+                    params[topicName] = false;
+
+                    //Topic creation
+                    var topic = new ROSLIB.Topic({
+                        ros : ros,
+                        name : topicName,
+                        messageType : type
+                    });
+
+                    controllers[topicName] = folders[type].add(params, topicName).onFinishChange(checked => {
+                      if(checked){
+                        //Subscribe to topic
+                        topic.subscribe(function(message) {
+
+                          switch(topic.messageType){
+                              case 'sensor_msgs/PointCloud2': handlePointCloud2(message); break;
+                              case 'tf2_msgs/TFMessage' : handleTF(message); break;
+                              case 'sensor_msgs/NavSatFix' : handleNavSatFix(message); break;
+                          }
+                        });
+                      }
+                      else{
+                        //Unsubscribe to topic
+                        topic.unsubscribe();
+                      }
+                    });
+                  })
+
+                }
+
                 // Specify the address of the rosbridge socket, the topic name and message type
-                showRosData('ws://del1101w005.ign.fr:9090/', '/velodyne_cloud_registered', 'sensor_msgs/PointCloud2');  
+                //showRosData(topic);
+
             </script>
     </body>
 </html>
-

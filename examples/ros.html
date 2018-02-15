@@ -43,7 +43,7 @@
             </script>
             <script src="https://cdn.jsdelivr.net/npm/eventemitter2@5.0.1/lib/eventemitter2.min.js"></script>
             <script src="https://cdnjs.cloudflare.com/ajax/libs/roslibjs/0.20.0/roslib.min.js"></script>
-            <script src="https://rawgit.com/LLB8/ros3djs/b2903709d2a8f90b1aa1b8955757a02d9156433c/build/ros3d.min.js"></script>
+            <script src="https://rawgit.com/LLB8/ros3djs/d03c0f9f384c12e1a3533faa4bc3c147b0c3873c/build/ros3d.min.js"></script>
             <script src="./ros.js"></script>
 
             <script type="text/javascript">
@@ -201,7 +201,11 @@
                 view.scene.add(point);
 
                 //Camera
-
+                if(!cameraPositioned){
+                  cameraPositioned = true;
+                  var firstPointPos = new THREE.Vector3(position.x, position.y, position.z);
+                  placeCamera(firstPointPos.clone().add(new itowns.THREE.Vector3(10,10,10)), firstPointPos);
+                }
                 console.log(message);
 
               }
@@ -233,12 +237,12 @@
             			view.scene.add(line);
             		}
 
-                /*
-            		if(lineId > 10){
+
+            		/*if(lineId > 10){
             			nameRem = "line"+ (lineId-10);
             			removeEntity(nameRem);
-            		}
-                */
+            		}*/
+
 
             		if(listCoords.length > 1){
             			listCoords.shift();
@@ -258,9 +262,11 @@
                 view.camera.camera3D.fov = 80;
 
                 //Camera
-                var firstPointPos = new THREE.Vector3(listCoords[0].latitude, listCoords[0].longitude, listCoords[0].altitude);
-                placeCamera(firstPointPos.clone().add(new itowns.THREE.Vector3(10,10,10)), firstPointPos);
-
+                if(!cameraPositioned){
+                  cameraPositioned = true;
+                  var firstPointPos = new THREE.Vector3(listCoords[0].latitude, listCoords[0].longitude, listCoords[0].altitude);
+                  placeCamera(firstPointPos.clone().add(new itowns.THREE.Vector3(10,10,10)), firstPointPos);
+                }
           	  }
 
               function placeCamera(position, lookAt) {
@@ -279,20 +285,24 @@
                 if(tfClient != undefined){
                   var pointCloudClient = new ROS3D.PointCloud2({
                     ros: ros,
-                    topic: '/velodyne_points',  // cpTopicName
+                    topic: '/Laser/velodyne_points',  // cpTopicName
                     tfClient: tfClient,
-                    rootObject: itowns.scene,
+                    rootObject: view.scene,
                     size: 0.05,
                     color: 'rgb(255,0,0)',
-                    // max_pts: 200
+                    max_pts: 100000,
                   });
                   console.log(pointCloudClient);
 
                   view.camera.camera3D.fov = 80;
 
                   //Camera
-                  var firstPointPos = new THREE.Vector3(729.11600663175, 691.1155969661977, 52.156698626746085);
-                  placeCamera(firstPointPos.clone().add(new itowns.THREE.Vector3(10,10,10)), firstPointPos);
+                  if(!cameraPositioned){
+                    cameraPositioned = true
+                    var firstPointPos = new THREE.Vector3(13, -8, 0);
+                    placeCamera(firstPointPos.clone().add(new itowns.THREE.Vector3(10,10,10)), firstPointPos);
+                  }
+
                 }
                 else{
                   console.log("No TF client");

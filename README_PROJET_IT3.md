@@ -17,7 +17,8 @@ Seulement la surcouche webGL d'iTowns n'est pas compatible avec le surcouche web
 2. [Implémentation](#impl%C3%A9mentation)
 3. [Lancement de l'application](#lancement-de-lacquisiton)
 4. [API](#api)
-5. [Améliorations possibles](#am%C3%A9liorations) 
+5. [Problèmes rencontrés](#)
+6. [Améliorations](#am%C3%A9liorations) 
 
 ## Installation  
 
@@ -36,6 +37,7 @@ L'implémentation comprend plusieurs étapes :
 - Récupération des différents messages proposés par ROS 
 - Création d'un menu en fonction des messages reçus
 - Interaction avec le menu par le biais d'un affichage des données (utilisation des handlers existants et création si besoin)
+- Correction de la librairie ros3Djs
 - Affichage des données ROS et tests en localhost
 - Intégration de l'implémentation dans itowns
 
@@ -60,6 +62,14 @@ L'implémentation comprend plusieurs étapes :
 
 Les différents messages .. to do ..
 
+## Problèmes rencontrés
+
+### Librairie ROS3Djs non fonctionnelle
+
+... to do ... (le problème rencontré + solution proposée)
+
+**[Retour en haut de la page](#table-des-matières)** 
+
 ## Améliorations
 
 .. to do ..
@@ -73,4 +83,3 @@ Les différents messages .. to do ..
 * **Laure Le Breton**
 
 **[Retour en haut de la page](#table-des-matières)** 
-

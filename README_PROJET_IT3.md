@@ -39,6 +39,7 @@ L'implémentation comprend plusieurs étapes :
 - Interaction avec le menu par le biais d'un affichage des données (utilisation des handlers existants et création si besoin)
 - Correction de la librairie ros3Djs
 - Affichage des données ROS et tests en localhost
+- Re-agencement des repères de chaque message
 - Intégration de l'implémentation dans itowns
 
 ## Lancement de l'acquisiton
@@ -67,6 +68,11 @@ Les différents messages .. to do ..
 ### Librairie ROS3Djs non fonctionnelle
 
 ... to do ... (le problème rencontré + solution proposée)
+
+
+### Outils de developpement compliqué à manipuler
+
+... to do ... (pb c'est importation en dur dans le code, donc fork, rawgit pour accéder au code modifié car pas d'accès comme une librairie et nouvelle version de commit à chaque fois)
 
 **[Retour en haut de la page](#table-des-matières)** 
 

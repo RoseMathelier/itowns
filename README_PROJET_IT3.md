@@ -44,7 +44,7 @@ L'implémentation comprend plusieurs étapes :
 
 ## Lancement de l'acquisiton
 
-### Lancement ddu serveur
+### Lancement du serveur
 .. to do ..
 
 ### Lancement du RosBag de test
@@ -55,11 +55,11 @@ L'implémentation comprend plusieurs étapes :
 
 ## API
 
-### Visualisation des résultats
-
-.. to do ..
-
 ### Les messages proposés
+
+![alt text](affichageMenu.png)
+
+### Visualisation des résultats
 
 Les différents messages .. to do ..
 

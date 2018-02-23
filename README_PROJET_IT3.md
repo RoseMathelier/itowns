@@ -20,13 +20,27 @@ Seulement la surcouche webGL d'iTowns n'est pas compatible avec le surcouche web
 5. [Problèmes rencontrés](#probl%C3%A8mes-rencontr%C3%A9s)
 6. [Améliorations](#am%C3%A9liorations) 
 
-## Installation  
+## Installation sur ubuntu
 
 ### itowns
-.. to do ..
+On peut trouver l'ensemble du projet itowns à l'adresse suivante : https://github.com/iTowns/itowns/tree/ros         
+
+
+Pour l'installer, il suffit alors de cloner l'adresse suivante dans un dossier prévu à cette effet : 
+
+                        `$ git clone https://github.com/iTowns/itowns.git`
+
+Sur itowns, une branche (ros) est dédiée à l'ajout des données provenant d'acquisitons avec ROS.    
+Il faut alors se rendre dans cette branche : `$ git checkout ros`   
+Puis installer les dépendances nécessaires au bon fonctionnement de l'application : `$ npm install`   
+Et enfin mettre en route l'application : `$ npm start`
 
 ### ROS
-.. to do ..
+Afin d'avoir accès à tous les outils nécessaires à l'utilisation de ROS dans ce projet, il est nécessaire d'installer plusieurs modules :   
+* [ROS Kinetic](wiki.ros.org/kinetic/Installation/Ubuntu) - Gestion des différents flux d'informations
+* [ROSBride](wiki.ros.org/rosbridge_suite/Tutorials/RunningRosbridge) - Proxy qui donne accès aux flux d'informations
+* [Roslibs.js](wiki.ros.org/roslibjs) - Permet la connexion de la websocket de ROS au Bridge
+* [Ros3D.js](wiki.ros.org/ros3djs) - Permet l'ajout d'objet THREE.js au projet
 
 **[Retour en haut de la page](#table-des-matières)** 
 

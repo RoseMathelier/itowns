@@ -13,7 +13,7 @@ Seulement la surcouche webGL d'iTowns n'est pas compatible avec le surcouche web
 
 ## Table des matières
 
-1. [Installation](#installation)
+1. [Installation](#installation-sur-ubuntu)
 2. [Implémentation](#impl%C3%A9mentation)
 3. [Lancement de l'application](#lancement-de-lacquisiton)
 4. [API](#api)
@@ -28,7 +28,7 @@ On peut trouver l'ensemble du projet itowns à l'adresse suivante : https://gith
 
 Pour l'installer, il suffit alors de cloner l'adresse suivante dans un dossier prévu à cette effet : 
 
-                        `$ git clone https://github.com/iTowns/itowns.git`
+                                 $ git clone https://github.com/iTowns/itowns.git
 
 Sur itowns, une branche (ros) est dédiée à l'ajout des données provenant d'acquisitons avec ROS.    
 Il faut alors se rendre dans cette branche : `$ git checkout ros`   

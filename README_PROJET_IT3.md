@@ -18,7 +18,7 @@ Seulement la surcouche webGL d'iTowns n'est pas compatible avec le surcouche web
 3. [Lancement de l'application](#lancement-de-lacquisiton)
 4. [API](#api)
 5. [Problèmes rencontrés](#probl%C3%A8mes-rencontr%C3%A9s)
-6. [Améliorations](#am%C3%A9liorations) 
+6. [Etat de l'art du projet](#etat-de-lart-du-projet) 
 
 ## Installation sur ubuntu
 
@@ -90,9 +90,10 @@ Les différents messages .. to do ..
 
 **[Retour en haut de la page](#table-des-matières)** 
 
-## Améliorations
+## Etat de l'art du projet
 
-.. to do ..
+En l'état actuel le projet n'est pas terminé. En effet, le problème de l'affichage des points n'ayant pas été résolu nous n'avons pas pu poursuivre le traitement des données.     
+Nous avons donc réalisé l'implémentation jusqu'à la correction de la librairie ros3djs. L'étape suivante (une fois le bug corrigé) serait alors de mettre toutes les données dans un repère unique grâce aux messages récupérés dans /tf puis de visualiser ces éléments dans itowns.  
 
 **[Retour en haut de la page](#table-des-matières)** 
 

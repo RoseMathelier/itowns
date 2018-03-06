@@ -73,9 +73,15 @@ L'implémentation comprend plusieurs étapes :
 
 ![alt text](affichageMenu.png)
 
+Ce menu de messages est obtenu en récupérant le flux de données issus de la websocket de ROS. 
+
 ### Visualisation des résultats
 
-Les différents messages .. to do ..
+Les messages actuellement pris en compte par l'application sont : 
+- tf : données de base sur les différents repères. Il est nécessaire de le cocher avant tout traitement.
+- Navsatfix : données de position du porteur 
+- camera : données de position des caméras 
+- Pointcloud : nuage de points récupéré par les équipements de mesure (n'est pas fonctionnel)
 
 ## Problèmes rencontrés
 

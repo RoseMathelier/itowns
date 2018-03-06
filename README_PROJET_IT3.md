@@ -5,7 +5,7 @@ Ce projet a pour but d'intégrer des données issues des acquisitons ROS dans la
 
 
         
-Pour cela, nous nous basons sur les bibliothèques ROSlibjs, qui permetd'extraire des informations de messages prédéfinis, et ROS3Djs qui permet d'afficher les données en webGL. 
+Pour cela, nous nous basons sur les bibliothèques ROSlibjs, qui permet d'extraire des informations de messages prédéfinis, et ROS3Djs qui permet d'afficher les données en webGL. 
 Seulement la surcouche webGL d'iTowns n'est pas compatible avec le surcouche webGL de ROS 3D, il faut donc adapter les deux librairies.
 
 

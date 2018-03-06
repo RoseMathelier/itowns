@@ -30,7 +30,7 @@ Pour l'installer, il suffit alors de cloner l'adresse suivante dans un dossier p
 
                                  $ git clone https://github.com/iTowns/itowns.git
 
-Sur itowns, une branche (ros) est dédiée à l'ajout des données provenant d'acquisitons avec ROS.    
+Sur iTowns, une branche (ros) est dédiée à l'ajout des données provenant d'acquisitons avec ROS.    
 Il faut alors se rendre dans cette branche : `$ git checkout ros`   
 Puis installer les dépendances nécessaires au bon fonctionnement de l'application : `$ npm install`   
 Et enfin mettre en route l'application : `$ npm start`

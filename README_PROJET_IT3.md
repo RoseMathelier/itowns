@@ -53,8 +53,8 @@ L'implémentation comprend plusieurs étapes :
 - Interaction avec le menu par le biais d'un affichage des données (utilisation des handlers existants et création si besoin)
 - Correction de la librairie ros3Djs
 - Affichage des données ROS et tests en localhost
-- Re-agencement des repères de chaque message
-- Intégration de l'implémentation dans itowns
+- *Re-agencement des repères de chaque message*
+- *Intégration de l'implémentation dans itowns*
 
 ## Lancement de l'acquisiton
 
@@ -85,8 +85,7 @@ rosbag play -l  LIEN VERS LE DOCUMENT BAG
 L'option -l permet de faire tourner le document en boucle pour effectuer nos tests sur un document qui contient peu de données et qui est donc plus facilement portable. 
 
 ### Recupération des données 
-Une fois ces opérations terminées, il est possible de récupérer les données dans le document source en javascript       
-?????
+Une fois ces opérations terminées, il est possible de récupérer les données dans le document source en javascript. Pour cela, on crée un objet roslib qui accède au données par le biais de l'URL sur lequel tourne le rosbridge (ici, localhost:9090). Différents écouteurs d'évènements permettent alors de récupérer les données. En particulier, la fonction *getTopics* accède aux topics afin de lancer la fonction de traitement.
 
 **[Retour en haut de la page](#table-des-matières)** 
 
@@ -96,7 +95,7 @@ Une fois ces opérations terminées, il est possible de récupérer les données
 
 ![alt text](affichageMenu.png)
 
-Ce menu de messages est obtenu en récupérant le flux de données issus de la websocket de ROS. 
+Ce menu de messages est obtenu en récupérant le flux de données issus de la websocket de ROS. Réalisé avec *dat.gui*, il est obtenu après récupération des topics : il s'adapte aux topics disponibles dans le rosbag actuel. Cocher un élément de ce menu permet de souscrire au topic correspondant et d'effectuer le traitement du message.
 
 ### Visualisation des résultats
 
@@ -104,32 +103,41 @@ Les messages actuellement pris en compte par l'application sont :
 - tf2_msgs/TFMessage : données de base sur les différents repères. Il est nécessaire de le cocher avant tout traitement.
 - sensor_msgs/NavSatFix : données de position du porteur     
     --> Affiche une ligne rouge suivant les coordonnées au cours du temps
-- sensor_msgs/Camerainfo : données de position des caméras     
+- geometry_msgs/PoseWithCovarianceStamped : données de position des caméras     
     --> Affiche des carrés qui représente la caméra 
 - sensor_msgs/PointCloud2 : nuage de points récupéré par les équipements de mesure (n'est pas fonctionnel)   
-    --> Est supposé afficher un nuage de point représentant les données scannées
-- geometry_msgs/PoseWithCovarianceStamped : ?? 
+    --> Est supposé afficher un nuage de point représentant les données scannées. Ces points ne sont pas visibles bien qu'ils soient présents dans la scène finale (visible grâce à la commande `console.log(view.scene`). 
 
 ## Problèmes rencontrés
 
 ### Librairie ROS3Djs non fonctionnelle
 
-... to do ... (le problème rencontré + solution proposée)
-Problème d'obsolescence pour .. 
-2 options s'offraint à nous : recréer la fonction point cloud2 sur ros3D ou essayer de modifier la bibiotheque
-On a modifié la bibiothèque en faisant .. 
+La fonction centrale que nous devions utiliser dans cette librairie *handlePointCloud2* n'est pas fonctionnelle en l'état. Une issue non encore résolue est d'ailleurs ouverte sur le github de ROS3Djs à ce sujet. En effet, elle utilise une version obsolète de threejs.      
+
+2 options s'offraient alors à nous pour corriger ce problème : 
+- recréer la fonction *handlePointCloud2* pour qu'elle ne dépende plus de ros3djs 
+- corriger la fonction utilisée dans ros3djs pour qu'elle dépende plus des fonctionnalités obsolètes de threejs
+
+Nous avons choisis la seconde option en remplaçant les *geometry* par les *buffergeometry*. Ainsi, certaines propriétés du shader ont migré à l'intérieur de la géometrie.  
+
+La librairie que nous utilisons actuellement est hébergée à [cette adresse](https://github.com/RoseMathelier/ros3djs).
+Il était nécessaire de compiler et de pousser les changements afin de les tester, ce qui a rendu le développement assez lourd. En effet, le lien à inclure dans le fichier javascript, généré grâce à l'outil *rawgit*, devait changer en fonction du numéro de commit pour se mettre à jour.
 
 
-### Outils de developpement compliqué à manipuler
+### Documentation limitée 
 
-... to do ... (pb c'est importation en dur dans le code, donc fork, rawgit pour accéder au code modifié car pas d'accès comme une librairie et nouvelle version de commit à chaque fois)
+La documentation disponible sur ROS et en particulier sur les messages et leur utilisation est limitée. Cela rend la lecture et le traitement des messages compliquée.      
+Par exemple pour la lecture des sensor_msgs/Camerainfo, il n'y avait aucune indication sur la façon de lier ce message à celui de positionnement dans le tf2_msgs/TFMessage. 
 
 **[Retour en haut de la page](#table-des-matières)** 
 
 ## Etat de l'art du projet
 
 En l'état actuel le projet n'est pas terminé. En effet, le problème de l'affichage des points n'ayant pas été résolu nous n'avons pas pu poursuivre le traitement des données.     
-Nous avons donc réalisé l'implémentation jusqu'à la correction de la librairie ros3djs. L'étape suivante (une fois le bug corrigé) serait alors de mettre toutes les données dans un repère unique grâce aux messages récupérés dans /tf puis de visualiser ces éléments dans itowns.  
+Nous avons donc réalisé l'implémentation jusqu'à la correction de la librairie ros3djs. L'étape suivante (une fois le bug corrigé) serait alors de mettre toutes les données dans un repère unique grâce aux messages récupérés dans /tf puis de visualiser ces éléments dans itowns.    
+       
+De plus, ce projet ne nous a pas permis de passer beaucoup de temps sur les problématiques directement liées à la 3D et à son traitement sur iTowns, les erreurs en amont étant trop importantes. Ainsi, une majorité du temps de projet a été consacrée à la compréhension de la structure des données ROS et des librairies associées pour le développement en javascript, mais également à la correction des erreurs de celles-ci.    
+Cependant, nous avons pu rendre fonctionnelle la librairie ROS3Djs et l'utiliser correctement dans notre code, et construire plusieurs gestionnaires pour une partie des messages. En outre, le code actuel peut facilement être complété avec d'autres  gestionnaires, en rajoutant simplement les fonctions nécessaires. Chaque message disponible est en effet détecté et apparaît automatiquement dans le menu utilisateur.
 
 **[Retour en haut de la page](#table-des-matières)** 
 

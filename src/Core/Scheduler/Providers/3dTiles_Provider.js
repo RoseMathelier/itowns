@@ -1,52 +1,71 @@
 import * as THREE from 'three';
-import Provider from './Provider';
 import B3dmLoader from '../../../Renderer/ThreeExtended/B3dmLoader';
 import PntsLoader from '../../../Renderer/ThreeExtended/PntsLoader';
 import Fetcher from './Fetcher';
 import OBB from '../../../Renderer/ThreeExtended/OBB';
 import Extent from '../../Geographic/Extent';
-import MathExtended from '../../Math/MathExtended';
+import { UNIT } from '../../Geographic/Coordinates';
 import Capabilities from '../../System/Capabilities';
 import PrecisionQualifier from '../../../Renderer/Shader/Chunk/PrecisionQualifier.glsl';
 import { init3dTilesLayer } from '../../../Process/3dTilesProcessing';
 
-
 function $3dTilesIndex(tileset, baseURL) {
     let counter = 0;
     this.index = {};
-    const recurse = function recurse_f(node, baseURL) {
+    const inverseTileTransform = new THREE.Matrix4();
+    const recurse = function recurse_f(node, baseURL, parent) {
+        // compute transform (will become Object3D.matrix when the object is downloaded)
+        node.transform = node.transform ? (new THREE.Matrix4()).fromArray(node.transform) : undefined;
+
+        // The only reason to store _worldFromLocalTransform is because of extendTileset where we need the
+        // transform chain for one node.
+        node._worldFromLocalTransform = node.transform;
+        if (parent && parent._worldFromLocalTransform) {
+            if (node.transform) {
+                node._worldFromLocalTransform = new THREE.Matrix4().multiplyMatrices(
+                    parent._worldFromLocalTransform, node.transform);
+            } else {
+                node._worldFromLocalTransform = parent._worldFromLocalTransform;
+            }
+        }
+
+        // getBox only use inverseTileTransform for volume.region so let's not
+        // compute the inverse matrix each time
+        if ((node.viewerRequestVolume && node.viewerRequestVolume.region)
+            || (node.boundingVolume && node.boundingVolume.region)) {
+            if (node._worldFromLocalTransform) {
+                inverseTileTransform.getInverse(node._worldFromLocalTransform);
+            } else {
+                inverseTileTransform.identity();
+            }
+        }
+
+        node.viewerRequestVolume = node.viewerRequestVolume ? getBox(node.viewerRequestVolume, inverseTileTransform) : undefined;
+        node.boundingVolume = getBox(node.boundingVolume, inverseTileTransform);
+
         this.index[counter] = node;
         node.tileId = counter;
         node.baseURL = baseURL;
         counter++;
         if (node.children) {
             for (const child of node.children) {
-                recurse(child, baseURL);
+                recurse(child, baseURL, node);
             }
         }
     }.bind(this);
     recurse(tileset.root, baseURL);
 
     this.extendTileset = function extendTileset(tileset, nodeId, baseURL) {
-        recurse(tileset.root, baseURL);
+        recurse(tileset.root, baseURL, this.index[nodeId]);
         this.index[nodeId].children = [tileset.root];
     };
 }
 
-function $3dTiles_Provider() {
-    Provider.call(this);
-    this.b3dmLoader = new B3dmLoader();
-}
+function preprocessDataLayer(layer, view, scheduler) {
+    layer.sseThreshold = layer.sseThreshold || 16;
+    layer.cleanupDelay = layer.cleanupDelay || 1000;
 
-$3dTiles_Provider.prototype = Object.create(Provider.prototype);
-
-$3dTiles_Provider.prototype.constructor = $3dTiles_Provider;
-
-$3dTiles_Provider.prototype.removeLayer = function removeLayer() {
-
-};
-
-$3dTiles_Provider.prototype.preprocessDataLayer = function preprocessDataLayer(layer, view, scheduler) {
+    layer._cleanableTiles = [];
     return Fetcher.json(layer.url, layer.networkOptions).then((tileset) => {
         layer.tileset = tileset;
         const urlPrefix = layer.url.slice(0, layer.url.lastIndexOf('/') + 1);
@@ -54,17 +73,14 @@ $3dTiles_Provider.prototype.preprocessDataLayer = function preprocessDataLayer(l
         layer.asset = tileset.asset;
         return init3dTilesLayer(view, scheduler, layer, tileset.root);
     });
-};
+}
 
 function getBox(volume, inverseTileTransform) {
     if (volume.region) {
         const region = volume.region;
-        const extent = new Extent('EPSG:4326', MathExtended.radToDeg(region[0]), MathExtended.radToDeg(region[2]), MathExtended.radToDeg(region[1]), MathExtended.radToDeg(region[3]));
+        const extent = new Extent('EPSG:4326', region[0], region[2], region[1], region[3]);
+        extent._internalStorageUnit = UNIT.RADIAN;
         const box = OBB.extentToOBB(extent, region[4], region[5]);
-        // update position
-        box.position.add(extent.center().as('EPSG:4978').xyz());
-        // compute box.matrix from box.position/rotation.
-        box.updateMatrix();
         // at this point box.matrix = box.epsg4978_from_local, so
         // we transform it in parent_from_local by using parent's epsg4978_from_local
         // which from our point of view is epsg4978_from_parent.
@@ -126,13 +142,22 @@ export function patchMaterialForLogDepthSupport(material) {
     };
 }
 
-$3dTiles_Provider.prototype.b3dmToMesh = function b3dmToMesh(data, layer) {
-    return this.b3dmLoader.parse(data, layer.asset.gltfUpAxis).then((result) => {
+let b3dmLoader;
+let textDecoder;
+function b3dmToMesh(data, layer, url) {
+    b3dmLoader = b3dmLoader || new B3dmLoader();
+    return b3dmLoader.parse(data, layer.asset.gltfUpAxis, url, textDecoder).then((result) => {
         const init = function f_init(mesh) {
             mesh.frustumCulled = false;
             if (mesh.material) {
                 if (layer.overrideMaterials) {
-                    mesh.material = new THREE.MeshLambertMaterial(0xffffff);
+                    mesh.material.dispose();
+                    if (typeof (layer.overrideMaterials) === 'object' &&
+                        layer.overrideMaterials.isMaterial) {
+                        mesh.material = layer.overrideMaterials.clone();
+                    } else {
+                        mesh.material = new THREE.MeshLambertMaterial({ color: 0xffffff });
+                    }
                 } else if (Capabilities.isLogDepthBufferSupported()
                             && mesh.material.isRawShaderMaterial
                             && !layer.doNotPatchMaterial) {
@@ -140,49 +165,54 @@ $3dTiles_Provider.prototype.b3dmToMesh = function b3dmToMesh(data, layer) {
                     // eslint-disable-next-line no-console
                     console.warn('b3dm shader has been patched to add log depth buffer support');
                 }
+                mesh.material.transparent = layer.opacity < 1.0;
+                mesh.material.opacity = layer.opacity;
             }
         };
-        result.scene.traverse(init);
-        return result.scene;
+        result.gltf.scene.traverse(init);
+        const batchTable = result.batchTable;
+        const object3d = result.gltf.scene;
+        return { batchTable, object3d };
     });
-};
+}
 
-$3dTiles_Provider.prototype.pntsParse = function pntsParse(data) {
+function pntsParse(data) {
     return new Promise((resolve) => {
-        resolve(PntsLoader.parse(data));
+        resolve({ object3d: PntsLoader.parse(data, textDecoder).point });
     });
-};
+}
 
 function configureTile(tile, layer, metadata, parent) {
     tile.frustumCulled = false;
-    tile.loaded = true;
     tile.layer = layer.id;
 
     // parse metadata
-    tile.transform = metadata.transform ? (new THREE.Matrix4()).fromArray(metadata.transform) : new THREE.Matrix4();
-    tile.applyMatrix(tile.transform);
+    if (metadata.transform) {
+        tile.applyMatrix(metadata.transform);
+    }
     tile.geometricError = metadata.geometricError;
     tile.tileId = metadata.tileId;
-    tile.additiveRefinement = (metadata.refine === 'add');
-    tile.parentFromLocalTransform = tile.transform;
-    tile.worldFromLocalTransform = new THREE.Matrix4().multiplyMatrices(parent ? parent.worldFromLocalTransform : new THREE.Matrix4(), tile.parentFromLocalTransform);
-    const m = new THREE.Matrix4();
-    m.getInverse(tile.worldFromLocalTransform);
-    tile.viewerRequestVolume = metadata.viewerRequestVolume ? getBox(metadata.viewerRequestVolume, m) : undefined;
-    tile.boundingVolume = getBox(metadata.boundingVolume, m);
+    if (metadata.refine) {
+        tile.additiveRefinement = (metadata.refine.toUpperCase() === 'ADD');
+    } else {
+        tile.additiveRefinement = parent ? (parent.additiveRefinement) : false;
+    }
+    tile.viewerRequestVolume = metadata.viewerRequestVolume;
+    tile.boundingVolume = metadata.boundingVolume;
     if (tile.boundingVolume.region) {
         tile.add(tile.boundingVolume.region);
     }
     tile.updateMatrixWorld();
 }
 
-const textDecoder = new TextDecoder('utf-8');
-$3dTiles_Provider.prototype.executeCommand = function executeCommand(command) {
+function executeCommand(command) {
     const layer = command.layer;
     const metadata = command.metadata;
     const tile = new THREE.Object3D();
     configureTile(tile, layer, metadata, command.requester);
     const path = metadata.content ? metadata.content.url : undefined;
+    textDecoder = textDecoder || new TextDecoder('utf-8');
+
     const setLayer = (obj) => {
         obj.layers.set(layer.threejsLayer);
     };
@@ -190,8 +220,8 @@ $3dTiles_Provider.prototype.executeCommand = function executeCommand(command) {
         // Check if we have relative or absolute url (with tileset's lopocs for example)
         const url = path.startsWith('http') ? path : metadata.baseURL + path;
         const supportedFormats = {
-            b3dm: this.b3dmToMesh.bind(this),
-            pnts: this.pntsParse.bind(this),
+            b3dm: b3dmToMesh,
+            pnts: pntsParse,
         };
         return Fetcher.arrayBuffer(url, layer.networkOptions).then((result) => {
             if (result !== undefined) {
@@ -210,9 +240,12 @@ $3dTiles_Provider.prototype.executeCommand = function executeCommand(command) {
                 }
                 if (func) {
                     // TODO: request should be delayed if there is a viewerRequestVolume
-                    return func(result, layer).then((content) => {
-                        tile.content = content;
-                        tile.add(content);
+                    return func(result, layer, url).then((content) => {
+                        tile.content = content.object3d;
+                        if (content.batchTable) {
+                            tile.batchTable = content.batchTable;
+                        }
+                        tile.add(content.object3d);
                         tile.traverse(setLayer);
                         return tile;
                     });
@@ -227,6 +260,9 @@ $3dTiles_Provider.prototype.executeCommand = function executeCommand(command) {
             resolve(tile);
         });
     }
-};
+}
 
-export default $3dTiles_Provider;
+export default {
+    preprocessDataLayer,
+    executeCommand,
+};

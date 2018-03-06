@@ -1,22 +1,23 @@
 import * as THREE from 'three';
 
 import View from '../View';
+import { RENDERING_PAUSED, MAIN_LOOP_EVENTS } from '../MainLoop';
 import { COLOR_LAYERS_ORDER_CHANGED } from '../../Renderer/ColorLayersOrdering';
 import RendererConstant from '../../Renderer/RendererConstant';
 import GlobeControls from '../../Renderer/ThreeExtended/GlobeControls';
-import { unpack1K } from '../../Renderer/LayeredMaterial';
 
 import { GeometryLayer } from '../Layer/Layer';
 
 import Atmosphere from './Globe/Atmosphere';
 import CoordStars from '../Geographic/CoordStars';
 
-import { C, ellipsoidSizes } from '../Geographic/Coordinates';
+import Coordinates, { C, ellipsoidSizes } from '../Geographic/Coordinates';
 import { processTiledGeometryNode } from '../../Process/TiledNodeProcessing';
 import { updateLayeredMaterialNodeImagery, updateLayeredMaterialNodeElevation } from '../../Process/LayeredMaterialNodeProcessing';
 import { globeCulling, preGlobeUpdate, globeSubdivisionControl, globeSchemeTileWMTS, globeSchemeTile1 } from '../../Process/GlobeTileProcessing';
 import BuilderEllipsoidTile from './Globe/BuilderEllipsoidTile';
 import SubdivisionControl from '../../Process/SubdivisionControl';
+import Picking from '../Picking';
 
 /**
  * Fires when the view is completely loaded. Controls and view's functions can be called then.
@@ -71,7 +72,6 @@ export const GLOBE_VIEW_EVENTS = {
     COLOR_LAYERS_ORDER_CHANGED,
 };
 
-
 export function createGlobeLayer(id, options) {
     // Configure tiles
     const nodeInitFn = function nodeInitFn(layer, parent, node) {
@@ -106,11 +106,11 @@ export function createGlobeLayer(id, options) {
         }
     }
 
-    const wgs84TileLayer = new GeometryLayer(id, options.object3d);
+    const wgs84TileLayer = new GeometryLayer(id, options.object3d || new THREE.Group());
     wgs84TileLayer.schemeTile = globeSchemeTileWMTS(globeSchemeTile1);
     wgs84TileLayer.extent = wgs84TileLayer.schemeTile[0].clone();
     for (let i = 1; i < wgs84TileLayer.schemeTile.length; i++) {
-        wgs84TileLayer.extent.merge(wgs84TileLayer.schemeTile[i]);
+        wgs84TileLayer.extent.union(wgs84TileLayer.schemeTile[i]);
     }
     wgs84TileLayer.preUpdate = (context, layer, changeSources) => {
         SubdivisionControl.preUpdate(context, layer);
@@ -157,7 +157,10 @@ export function createGlobeLayer(id, options) {
 
     function subdivision(context, layer, node) {
         if (SubdivisionControl.hasEnoughTexturesToSubdivide(context, layer, node)) {
-            return globeSubdivisionControl(2, options.maxSubdivisionLevel || 17, options.sseSubdivisionThreshold || 1.0)(context, layer, node);
+            return globeSubdivisionControl(2,
+                options.maxSubdivisionLevel || 18,
+                options.sseSubdivisionThreshold || 1.0,
+                options.maxDeltaElevationLevel || 4)(context, layer, node);
         }
         return false;
     }
@@ -172,6 +175,9 @@ export function createGlobeLayer(id, options) {
         enable: false,
         position: { x: -0.5, y: 0.0, z: 1.0 },
     };
+    // provide custom pick function
+    wgs84TileLayer.pickObjectsAt = (_view, mouse) => Picking.pickTilesAt(_view, mouse, wgs84TileLayer);
+
     return wgs84TileLayer;
 }
 
@@ -192,8 +198,6 @@ function GlobeView(viewerDiv, coordCarto, options = {}) {
     const size = ellipsoidSizes().x;
     // Setup View
     View.call(this, 'EPSG:4978', viewerDiv, options);
-
-    options.object3d = options.object3d || this.scene;
 
     // Configure camera
     const positionCamera = new C.EPSG_4326(
@@ -236,31 +240,59 @@ function GlobeView(viewerDiv, coordCarto, options = {}) {
         this.camera.camera3D.lookAt(positionTargetCamera.as('EPSG:4978').xyz());
     } else {
         this.controls = new GlobeControls(this, positionTargetCamera.as('EPSG:4978').xyz(), size);
+        this.controls.handleCollision = typeof (options.handleCollision) !== 'undefined' ? options.handleCollision : true;
     }
 
+    const mfogDistance = size * 160.0;
     this._renderState = RendererConstant.FINAL;
+    this._fullSizeDepthBuffer = null;
+
     const renderer = this.mainLoop.gfxEngine.renderer;
-    this.preRender = () => {
+
+    const coordCam = new Coordinates(this.referenceCrs, 0, 0, 0);
+    const coordGeoCam = new C.EPSG_4326();
+    const skyBaseColor = new THREE.Color(0x93d5f8);
+    const colorSky = new THREE.Color();
+    const spaceColor = new THREE.Color(0x030508);
+    const limitAlti = 600000;
+
+    this.addFrameRequester(MAIN_LOOP_EVENTS.BEFORE_RENDER, () => {
+        if (this._fullSizeDepthBuffer != null) {
+            // clean depth buffer
+            this._fullSizeDepthBuffer = null;
+        }
         const v = new THREE.Vector3();
         v.setFromMatrixPosition(wgs84TileLayer.object3d.matrixWorld);
         var len = v.distanceTo(this.camera.camera3D.position);
         v.setFromMatrixScale(wgs84TileLayer.object3d.matrixWorld);
-        var lim = v.x * size * 1.1;
 
-        if (len < lim) {
-            var t = Math.pow(Math.cos((lim - len) / (lim - v.x * size * 0.9981) * Math.PI * 0.5), 1.5);
-            var color = new THREE.Color(0x93d5f8);
-            renderer.setClearColor(color.multiplyScalar(1.0 - t), renderer.getClearAlpha());
-        } else if (len >= lim) {
-            renderer.setClearColor(0x030508, renderer.getClearAlpha());
+        // TODO: may be move in camera update
+        // Compute fog distance, this function makes it possible to have a shorter distance
+        // when the camera approaches the ground
+        this.fogDistance = mfogDistance * Math.pow((len - size * 0.99) * 0.25 / size, 1.5);
+
+        // get altitude camera
+        coordCam.set(this.referenceCrs, this.camera.camera3D.position).as('EPSG:4326', coordGeoCam);
+        const altitude = coordGeoCam.altitude();
+
+        // If the camera altitude is below limitAlti,
+        // we interpolate between the sky color and the space color
+        if (altitude < limitAlti) {
+            const t = (limitAlti - altitude) / limitAlti;
+            colorSky.copy(spaceColor).lerp(skyBaseColor, t);
+            renderer.setClearColor(colorSky, renderer.getClearAlpha());
+        } else {
+            renderer.setClearColor(spaceColor, renderer.getClearAlpha());
         }
-    };
+    });
 
     this.wgs84TileLayer = wgs84TileLayer;
 
     const fn = () => {
-        this.mainLoop.removeEventListener('command-queue-empty', fn);
-        this.dispatchEvent({ type: GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED });
+        if (this._changeSources.size == 0) {
+            this.mainLoop.removeEventListener('command-queue-empty', fn);
+            this.dispatchEvent({ type: GLOBE_VIEW_EVENTS.GLOBE_INITIALIZED });
+        }
     };
 
     this.mainLoop.addEventListener('command-queue-empty', fn);
@@ -332,7 +364,8 @@ GlobeView.prototype.removeLayer = function removeImageryLayer(layerId) {
 };
 
 GlobeView.prototype.selectNodeAt = function selectNodeAt(mouse) {
-    const selectedId = this.screenCoordsToNodeId(mouse);
+    const picked = this.wgs84TileLayer.pickObjectsAt(this, mouse);
+    const selectedId = picked.length ? picked[0].object.id : undefined;
 
     for (const n of this.wgs84TileLayer.level0Nodes) {
         n.traverse((node) => {
@@ -351,33 +384,13 @@ GlobeView.prototype.selectNodeAt = function selectNodeAt(mouse) {
     this.notifyChange(true);
 };
 
-GlobeView.prototype.screenCoordsToNodeId = function screenCoordsToNodeId(mouse) {
-    const dim = this.mainLoop.gfxEngine.getWindowSize();
+GlobeView.prototype.readDepthBuffer = function readDepthBuffer(x, y, width, height) {
+    const g = this.mainLoop.gfxEngine;
+    const restore = this.wgs84TileLayer.level0Nodes.map(n => n.pushRenderState(RendererConstant.DEPTH));
+    const buffer = g.renderViewTobuffer(this, g.fullSizeRenderTarget, x, y, width, height);
+    restore.forEach(r => r());
 
-    mouse = mouse || new THREE.Vector2(Math.floor(dim.x / 2), Math.floor(dim.y / 2));
-
-    const previousRenderState = this._renderState;
-    this.changeRenderState(RendererConstant.ID);
-
-    // Prepare state
-    const prev = this.camera.camera3D.layers.mask;
-    this.camera.camera3D.layers.mask = 1 << this.wgs84TileLayer.threejsLayer;
-
-    var buffer = this.mainLoop.gfxEngine.renderViewTobuffer(
-        this,
-        this.mainLoop.gfxEngine.fullSizeRenderTarget,
-        mouse.x, dim.y - mouse.y,
-        1, 1);
-
-    this.changeRenderState(previousRenderState);
-    this.camera.camera3D.layers.mask = prev;
-
-    var depthRGBA = new THREE.Vector4().fromArray(buffer).divideScalar(255.0);
-
-    // unpack RGBA to float
-    var unpack = unpack1K(depthRGBA, Math.pow(256, 3));
-
-    return Math.round(unpack);
+    return buffer;
 };
 
 const matrix = new THREE.Matrix4();
@@ -385,26 +398,29 @@ const screen = new THREE.Vector2();
 const pickWorldPosition = new THREE.Vector3();
 const ray = new THREE.Ray();
 const direction = new THREE.Vector3();
-const depthRGBA = new THREE.Vector4();
 GlobeView.prototype.getPickingPositionFromDepth = function getPickingPositionFromDepth(mouse) {
-    const dim = this.mainLoop.gfxEngine.getWindowSize();
+    const l = this.mainLoop;
+    const viewPaused = l.scheduler.commandsWaitingExecutionCount() == 0 && l.renderingState == RENDERING_PAUSED;
+    const g = l.gfxEngine;
+    const dim = g.getWindowSize();
+    const camera = this.camera.camera3D;
+
     mouse = mouse || dim.clone().multiplyScalar(0.5);
+    mouse.x = Math.floor(mouse.x);
+    mouse.y = Math.floor(mouse.y);
 
-    var camera = this.camera.camera3D;
+    const prev = camera.layers.mask;
+    camera.layers.mask = 1 << this.wgs84TileLayer.threejsLayer;
 
-    // Prepare state
-    const prev = this.camera.camera3D.layers.mask;
-    this.camera.camera3D.layers.mask = 1 << this.wgs84TileLayer.threejsLayer;
-
-    const previousRenderState = this._renderState;
-    this.changeRenderState(RendererConstant.DEPTH);
-
-    // Render to buffer
-    var buffer = this.mainLoop.gfxEngine.renderViewTobuffer(
-        this,
-        this.mainLoop.gfxEngine.fullSizeRenderTarget,
-        mouse.x, dim.y - mouse.y,
-        1, 1);
+    // Render/Read to buffer
+    let buffer;
+    if (viewPaused) {
+        this._fullSizeDepthBuffer = this._fullSizeDepthBuffer || this.readDepthBuffer(0, 0, dim.x, dim.y);
+        const id = ((dim.y - mouse.y - 1) * dim.x + mouse.x) * 4;
+        buffer = this._fullSizeDepthBuffer.slice(id, id + 4);
+    } else {
+        buffer = this.readDepthBuffer(mouse.x, dim.y - mouse.y - 1, 1, 1);
+    }
 
     screen.x = (mouse.x / dim.x) * 2 - 1;
     screen.y = -(mouse.y / dim.y) * 2 + 1;
@@ -423,42 +439,18 @@ GlobeView.prototype.getPickingPositionFromDepth = function getPickingPositionFro
     direction.applyMatrix4(matrix);
     direction.sub(ray.origin);
 
-    var angle = direction.angleTo(ray.direction);
+    const angle = direction.angleTo(ray.direction);
+    const orthoZ = g.depthBufferRGBAValueToOrthoZ(buffer, camera);
+    const length = orthoZ / Math.cos(angle);
 
-    depthRGBA.fromArray(buffer).divideScalar(255.0);
+    pickWorldPosition.addVectors(camera.position, ray.direction.setLength(length));
 
-    var depth = unpack1K(depthRGBA, 100000000.0) / Math.cos(angle);
-
-    pickWorldPosition.addVectors(camera.position, ray.direction.setLength(depth));
-
-    // Restore initial state
-    this.changeRenderState(previousRenderState);
     camera.layers.mask = prev;
 
     if (pickWorldPosition.length() > 10000000)
         { return undefined; }
 
     return pickWorldPosition;
-};
-
-GlobeView.prototype.changeRenderState = function changeRenderState(newRenderState) {
-    if (this._renderState == newRenderState || !this.wgs84TileLayer.level0Nodes) {
-        return;
-    }
-
-    // build traverse function
-    var changeStateFunction = (function getChangeStateFunctionFn() {
-        return function changeStateFunction(object3D) {
-            if (object3D.changeState) {
-                object3D.changeState(newRenderState);
-            }
-        };
-    }());
-
-    for (const n of this.wgs84TileLayer.level0Nodes) {
-        n.traverseVisible(changeStateFunction);
-    }
-    this._renderState = newRenderState;
 };
 
 GlobeView.prototype.setRealisticLightingOn = function setRealisticLightingOn(value) {

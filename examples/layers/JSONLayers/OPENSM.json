@@ -1,15 +1,15 @@
 {
     "type": "color",
-    "protocol": "wmtsc",
+    "protocol": "xyz",
     "networkOptions": { "crossOrigin" : "anonymous" },
     "id": "OPENSM",
-    "customUrl": "http://a.basemaps.cartocdn.com/voyager/%TILEMATRIX/%COL/%ROW.png",
+    "url": "http://osm.oslandia.io/styles/klokantech-basic/${z}/${x}/${y}.png",
+    "format": "image/png",
     "options": {
         "attribution": {
-            "name":"CARTO",
-            "url": "https://carto.com/"
+            "name":"OpenStreetMap",
+            "url": "http://www.openstreetmap.org/"
         },
-        "tileMatrixSet": "PM",
-        "mimetype": "image/png"
+        "tileMatrixSet": "PM"
     }
 }

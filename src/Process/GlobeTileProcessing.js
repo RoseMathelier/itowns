@@ -7,10 +7,21 @@ import Extent from '../Core/Geographic/Extent';
 const cV = new THREE.Vector3();
 let vhMagnitudeSquared;
 
-let preSSE;
 let SSE_SUBDIVISION_THRESHOLD;
 
 const worldToScaledEllipsoid = new THREE.Matrix4();
+
+function _preSSE(view) {
+    const canvasSize = view.mainLoop.gfxEngine.getWindowSize();
+    const hypotenuse = canvasSize.length();
+    const radAngle = view.camera.camera3D.fov * Math.PI / 180;
+
+     // TODO: not correct -> see new preSSE
+    // const HFOV = 2.0 * Math.atan(Math.tan(radAngle * 0.5) / context.camera.ratio);
+    const HYFOV = 2.0 * Math.atan(Math.tan(radAngle * 0.5) * hypotenuse / canvasSize.x);
+
+    return hypotenuse * (2.0 * Math.tan(HYFOV * 0.5));
+}
 
 export function preGlobeUpdate(context, layer) {
     // We're going to use the method described here:
@@ -30,20 +41,24 @@ export function preGlobeUpdate(context, layer) {
     vhMagnitudeSquared = cV.lengthSq() - 1.0;
 
     // pre-sse
-    const canvasSize = context.engine.getWindowSize();
-    const hypotenuse = canvasSize.length();
-    const radAngle = context.camera.camera3D.fov * Math.PI / 180;
+    context.camera.preSSE = _preSSE(context.view);
 
-     // TODO: not correct -> see new preSSE
-    // const HFOV = 2.0 * Math.atan(Math.tan(radAngle * 0.5) / context.camera.ratio);
-    const HYFOV = 2.0 * Math.atan(Math.tan(radAngle * 0.5) * hypotenuse / canvasSize.x);
-
-    preSSE = hypotenuse * (2.0 * Math.tan(HYFOV * 0.5));
+    const elevationLayers = context.view.getLayers((l, a) => a && a.id == layer.id && l.type == 'elevation');
+    context.maxElevationLevel = -1;
+    for (const e of elevationLayers) {
+        context.maxElevationLevel = Math.max(e.options.zoom.max, context.maxElevationLevel);
+    }
+    if (context.maxElevationLevel == -1) {
+        context.maxElevationLevel = Infinity;
+    }
 }
 
+const vT = new THREE.Vector3();
 function pointHorizonCulling(pt) {
     // see https://cesiumjs.org/2013/04/25/Horizon-culling/
-    const vT = pt.applyMatrix4(worldToScaledEllipsoid).sub(cV);
+
+    vT.copy(pt);
+    vT.applyMatrix4(worldToScaledEllipsoid).sub(cV);
 
     const vtMagnitudeSquared = vT.lengthSq();
 
@@ -57,10 +72,10 @@ function pointHorizonCulling(pt) {
 }
 
 function horizonCulling(node) {
-    const points = node.OBB().pointsWorld;
+    const points = node.OBB().topPointsWorld;
 
     for (const point of points) {
-        if (!pointHorizonCulling(point.clone())) {
+        if (!pointHorizonCulling(point)) {
             return true;
         }
     }
@@ -77,13 +92,13 @@ export function globeCulling(minLevelForHorizonCulling) {
     };
 }
 
+const v = new THREE.Vector3();
 function computeNodeSSE(camera, node) {
-    const v = new THREE.Vector3();
     v.setFromMatrixScale(node.matrixWorld);
-    const boundingSphereCenter = new THREE.Vector3().addVectors(node.geometry.boundingSphere.center, node.boundingSphereOffset).applyMatrix4(node.matrixWorld);
+    const boundingSphereCenter = node.boundingSphere.center.clone().applyMatrix4(node.matrixWorld);
     const distance = Math.max(
         0.0,
-        camera.camera3D.position.distanceTo(boundingSphereCenter) - node.geometry.boundingSphere.radius * v.x);
+        camera.camera3D.position.distanceTo(boundingSphereCenter) - node.boundingSphere.radius * v.x);
 
     // Removed because is false computation, it doesn't consider the altitude of node
     // Added small oblique weight (distance is not enough, tile orientation is needed)
@@ -96,16 +111,25 @@ function computeNodeSSE(camera, node) {
 
     // TODO: node.geometricError is computed using a hardcoded 18 level
     // The computation of node.geometricError is surely false
-    return preSSE * (node.geometricError * v.x) / distance;
+    return camera.preSSE * (node.geometricError * v.x) / distance;
 }
 
-export function globeSubdivisionControl(minLevel, maxLevel, sseThreshold) {
+export function globeSubdivisionControl(minLevel, maxLevel, sseThreshold, maxDeltaElevationLevel) {
     SSE_SUBDIVISION_THRESHOLD = sseThreshold;
     return function _globeSubdivisionControl(context, layer, node) {
         if (node.level < minLevel) {
             return true;
         }
         if (maxLevel <= node.level) {
+            return false;
+        }
+        // Prevent to subdivise the node if the current elevation level
+        // we must avoid a tile, with level 20, inherits a level 3 elevation texture.
+        // The induced geometric error is much too large and distorts the SSE
+        const currentElevationLevel = node.material.getElevationLayerLevel();
+        if (node.level < context.maxElevationLevel + maxDeltaElevationLevel &&
+            currentElevationLevel >= 0 &&
+            (node.level - currentElevationLevel) >= maxDeltaElevationLevel) {
             return false;
         }
 
@@ -139,9 +163,9 @@ export function globeSchemeTileWMTS(type) {
     return schemeT;
 }
 
-export function computeTileZoomFromDistanceCamera(distance) {
+export function computeTileZoomFromDistanceCamera(distance, view) {
     const sizeEllipsoid = ellipsoidSizes().x;
-    const preSinus = SIZE_TEXTURE_TILE * (SSE_SUBDIVISION_THRESHOLD * 0.5) / preSSE / sizeEllipsoid;
+    const preSinus = SIZE_TEXTURE_TILE * (SSE_SUBDIVISION_THRESHOLD * 0.5) / view.camera.preSSE / sizeEllipsoid;
 
     let sinus = distance * preSinus;
     let zoom = Math.log(Math.PI / (2.0 * Math.asin(sinus))) / Math.log(2);
@@ -157,11 +181,11 @@ export function computeTileZoomFromDistanceCamera(distance) {
     return isNaN(zoom) ? 0 : Math.round(zoom);
 }
 
-export function computeDistanceCameraFromTileZoom(zoom) {
+export function computeDistanceCameraFromTileZoom(zoom, view) {
     const delta = Math.PI / Math.pow(2, zoom);
     const circleChord = 2.0 * ellipsoidSizes().x * Math.sin(delta * 0.5);
     const radius = circleChord * 0.5;
     const error = radius / SIZE_TEXTURE_TILE;
 
-    return preSSE * error / (SSE_SUBDIVISION_THRESHOLD * 0.5) + radius;
+    return view.camera.preSSE * error / (SSE_SUBDIVISION_THRESHOLD * 0.5) + radius;
 }

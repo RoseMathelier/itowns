@@ -7,7 +7,7 @@ export function planarCulling(node, camera) {
 }
 
 function _isTileBigOnScreen(camera, node) {
-    const onScreen = camera.box3SizeOnScreen(node.geometry.OBB.box3D, node.matrixWorld);
+    const onScreen = camera.box3SizeOnScreen(node.OBB().box3D, node.matrixWorld);
 
     // onScreen.x/y/z are [-1, 1] so divide by 2
     // (so x = 0.4 means the object width on screen is 40% of the total screen width)
@@ -22,9 +22,30 @@ function _isTileBigOnScreen(camera, node) {
     return (dim.x >= 0.3 && dim.y >= 0.3);
 }
 
-export function planarSubdivisionControl(maxLevel) {
+export function prePlanarUpdate(context, layer) {
+    const elevationLayers = context.view.getLayers((l, a) => a && a.id == layer.id && l.type == 'elevation');
+    context.maxElevationLevel = -1;
+    for (const e of elevationLayers) {
+        context.maxElevationLevel = Math.max(e.options.zoom.max, context.maxElevationLevel);
+    }
+    if (context.maxElevationLevel == -1) {
+        context.maxElevationLevel = Infinity;
+    }
+}
+
+export function planarSubdivisionControl(maxLevel, maxDeltaElevationLevel) {
     return function _planarSubdivisionControl(context, layer, node) {
         if (maxLevel <= node.level) {
+            return false;
+        }
+
+        // Prevent to subdivise the node if the current elevation level
+        // we must avoid a tile, with level 20, inherits a level 3 elevation texture.
+        // The induced geometric error is much too large and distorts the SSE
+        const currentElevationLevel = node.material.getElevationLayerLevel();
+        if (node.level < context.maxElevationLevel + maxDeltaElevationLevel &&
+            currentElevationLevel >= 0 &&
+            (node.level - currentElevationLevel) >= maxDeltaElevationLevel) {
             return false;
         }
 

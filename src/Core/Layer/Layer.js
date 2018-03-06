@@ -1,4 +1,5 @@
 import { EventDispatcher } from 'three';
+import Picking from '../Picking';
 
 /**
  * Fires when layer sequence change (meaning when the order of the layer changes in the view)
@@ -62,6 +63,10 @@ function GeometryLayer(id, object3d) {
     }
     this._attachedLayers = [];
 
+    if (object3d && object3d.type === 'Group' && object3d.name === '') {
+        object3d.name = id;
+    }
+
     Object.defineProperty(this, 'object3d', {
         value: object3d,
         writable: false,
@@ -71,6 +76,9 @@ function GeometryLayer(id, object3d) {
         value: id,
         writable: false,
     });
+
+    // Setup default picking method
+    this.pickObjectsAt = (view, mouse) => Picking.pickObjectsAt(view, mouse, this.object3d);
 
     this.postUpdate = () => {};
 }

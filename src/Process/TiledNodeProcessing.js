@@ -1,9 +1,12 @@
 import Extent from '../Core/Geographic/Extent';
-import { CancelledCommandException } from '../Core/Scheduler/Scheduler';
+import Coordinates from '../Core/Geographic/Coordinates';
+import CancelledCommandException from '../Core/Scheduler/CancelledCommandException';
 import ObjectRemovalHelper from './ObjectRemovalHelper';
 
+
+const center = new Coordinates('EPSG:4326', 0, 0, 0);
 function subdivisionExtents(bbox) {
-    const center = bbox.center();
+    bbox.center(center);
 
     const northWest = new Extent(bbox.crs(),
         bbox.west(), center._values[0],
@@ -69,7 +72,6 @@ function subdivideNode(context, layer, node) {
             for (const child of children) {
                 node.add(child);
                 child.updateMatrixWorld(true);
-                child.OBB().update();
 
                 child.material.uniforms.lightPosition.value =
                     node.material.uniforms.lightPosition.value;
@@ -126,7 +128,9 @@ export function processTiledGeometryNode(cullingTest, subdivisionTest) {
 
             if (node.material.visible) {
                 // update uniforms
-                node.setFog(1000000000);
+                if (context.view.fogDistance != undefined) {
+                    node.setFog(context.view.fogDistance);
+                }
 
                 if (!requestChildrenUpdate) {
                     return ObjectRemovalHelper.removeChildren(layer.id, node);

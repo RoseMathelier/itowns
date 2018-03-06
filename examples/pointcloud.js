@@ -18,14 +18,14 @@ function showPointcloud(serverUrl, fileName, lopocsTable) {
         '+proj=lcc +lat_1=45.25 +lat_2=46.75 +lat_0=46 +lon_0=3 +x_0=1700000 ' +
         '+y_0=5200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
 
-    debugGui = new dat.GUI();
+    debugGui = new dat.GUI({ width: 400 });
 
     // TODO: do we really need to disable logarithmicDepthBuffer ?
     view = new itowns.View('EPSG:3946', viewerDiv, { renderer: { logarithmicDepthBuffer: true } });
     view.mainLoop.gfxEngine.renderer.setClearColor(0xcccccc);
 
     // Configure Point Cloud layer
-    pointcloud = new itowns.GeometryLayer('pointcloud', view.scene);
+    pointcloud = new itowns.GeometryLayer('pointcloud', new itowns.THREE.Group());
     pointcloud.file = fileName || 'infos/sources';
     pointcloud.protocol = 'potreeconverter';
     pointcloud.url = serverUrl;
@@ -33,16 +33,10 @@ function showPointcloud(serverUrl, fileName, lopocsTable) {
 
     // point selection on double-click
     function dblClickHandler(event) {
-        var pick;
-        var mouse = {
-            x: event.offsetX,
-            y: (event.currentTarget.height || event.currentTarget.offsetHeight) - event.offsetY,
-        };
+        var pick = view.pickObjectsAt(event, pointcloud);
 
-        pick = itowns.PointCloudProcessing.selectAt(view, pointcloud, mouse);
-
-        if (pick) {
-            console.log('Selected point #' + pick.index + ' in Points "' + pick.points.owner.name + '"');
+        if (pick.length) {
+            console.log('Selected point #' + pick[0].index + ' in Points "' + pick[0].object.owner.name + '"');
         }
     }
     view.mainLoop.gfxEngine.renderer.domElement.addEventListener('dblclick', dblClickHandler);
@@ -53,7 +47,7 @@ function showPointcloud(serverUrl, fileName, lopocsTable) {
         view.camera.camera3D.lookAt(lookAt);
         // create controls
         controls = new itowns.FirstPersonControls(view, { focusOnClick: true });
-        debugGui.add(controls, 'moveSpeed', 1, 100).name('Movement speed');
+        debugGui.add(controls.options, 'moveSpeed', 1, 100).name('Movement speed');
 
         view.notifyChange(true);
     }
@@ -86,6 +80,7 @@ function showPointcloud(serverUrl, fileName, lopocsTable) {
                 Math.floor(100 * pointcloud.counters.displayedCount / pointcloud.counters.pointCount) + '%) (' +
                 view.mainLoop.gfxEngine.renderer.info.memory.geometries + ')';
         };
+        window.view = view;
     }
 
     view.addLayer(pointcloud).then(onLayerReady);

@@ -5,7 +5,8 @@
  */
 
 import * as THREE from 'three';
-import LayeredMaterial, { l_ELEVATION } from '../Renderer/LayeredMaterial';
+import LayeredMaterial from '../Renderer/LayeredMaterial';
+import { l_ELEVATION } from '../Renderer/LayeredMaterialConstants';
 import RendererConstant from '../Renderer/RendererConstant';
 import OGCWebServiceHelper, { SIZE_TEXTURE_TILE } from './Scheduler/Providers/OGCWebServiceHelper';
 
@@ -24,11 +25,10 @@ function TileMesh(geometry, params) {
     this.extent = params.extent;
 
     this.geometry = geometry;
-    this.normal = params.center.clone().normalize();
 
-    this.boundingSphereOffset = new THREE.Vector3();
+    this.obb = this.geometry.OBB.clone();
 
-    this.oSphere = new THREE.Sphere(this.geometry.boundingSphere.center.clone(), this.geometry.boundingSphere.radius);
+    this.boundingSphere = this.OBB().box3D.getBoundingSphere();
 
     this.material = new LayeredMaterial(params.materialOptions);
 
@@ -42,6 +42,8 @@ function TileMesh(geometry, params) {
     this.layerUpdateState = {};
 
     this.material.setUuid(this.id);
+
+    this._state = RendererConstant.FINAL;
 }
 
 TileMesh.prototype = Object.create(THREE.Mesh.prototype);
@@ -49,7 +51,7 @@ TileMesh.prototype.constructor = TileMesh;
 
 TileMesh.prototype.updateMatrixWorld = function updateMatrixWorld(force) {
     THREE.Mesh.prototype.updateMatrixWorld.call(this, force);
-    this.geometry.OBB.update();
+    this.OBB().update();
 };
 
 TileMesh.prototype.isVisible = function isVisible() {
@@ -70,6 +72,9 @@ TileMesh.prototype.isDisplayed = function isDisplayed() {
 
 // switch material in function of state
 TileMesh.prototype.changeState = function changeState(state) {
+    if (state == this._state) {
+        return;
+    }
     if (state == RendererConstant.DEPTH) {
         this.material.defines.DEPTH_MODE = 1;
         delete this.material.defines.MATTE_ID_MODE;
@@ -81,7 +86,28 @@ TileMesh.prototype.changeState = function changeState(state) {
         delete this.material.defines.DEPTH_MODE;
     }
 
+    this._state = state;
+
     this.material.needsUpdate = true;
+};
+
+function applyChangeState(n, s) {
+    if (n.changeState) {
+        n.changeState(s);
+    }
+}
+
+TileMesh.prototype.pushRenderState = function pushRenderState(state) {
+    if (this._state == state) {
+        return () => { };
+    }
+
+    const oldState = this._state;
+    this.traverse(n => applyChangeState(n, state));
+
+    return () => {
+        this.traverse(n => applyChangeState(n, oldState));
+    };
 };
 
 TileMesh.prototype.setFog = function setFog(fog) {
@@ -97,7 +123,7 @@ TileMesh.prototype.setTextureElevation = function setTextureElevation(elevation)
         return;
     }
 
-    const offsetScale = elevation.pitch || new THREE.Vector3(0, 0, 1);
+    const offsetScale = elevation.pitch || new THREE.Vector4(0, 0, 1, 1);
     this.setBBoxZ(elevation.min, elevation.max);
 
     this.material.setTexture(elevation.texture, l_ELEVATION, 0, offsetScale);
@@ -108,20 +134,17 @@ TileMesh.prototype.setBBoxZ = function setBBoxZ(min, max) {
     if (min == undefined && max == undefined) {
         return;
     }
-    if (Math.floor(min) !== Math.floor(this.geometry.OBB.z.min) || Math.floor(max) !== Math.floor(this.geometry.OBB.z.max)) {
-        const delta = this.geometry.OBB.updateZ(min, max);
-        const trans = this.normal.clone().setLength(delta.y);
-
-        this.geometry.boundingSphere.radius = Math.sqrt(delta.x * delta.x + this.oSphere.radius * this.oSphere.radius);
+    if (Math.floor(min) !== Math.floor(this.obb.z.min) || Math.floor(max) !== Math.floor(this.obb.z.max)) {
+        this.OBB().updateZ(min, max);
+        this.OBB().box3D.getBoundingSphere(this.boundingSphere);
         this.updateGeometricError();
-        this.boundingSphereOffset = trans;
     }
 };
 
 TileMesh.prototype.updateGeometricError = function updateGeometricError() {
     // The geometric error is calculated to have a correct texture display.
     // For the projection of a texture's texel to be less than or equal to one pixel
-    this.geometricError = this.geometry.boundingSphere.radius / SIZE_TEXTURE_TILE;
+    this.geometricError = this.boundingSphere.radius / SIZE_TEXTURE_TILE;
 };
 
 TileMesh.prototype.setTexturesLayer = function setTexturesLayer(textures, layerType, layerId) {
@@ -152,24 +175,8 @@ TileMesh.prototype.isColorLayerDownscaled = function isColorLayerDownscaled(laye
     return mat.isColorLayerDownscaled(layer.id, this.getZoomForLayer(layer));
 };
 
-TileMesh.prototype.normals = function normals() {
-    return this.geometry.normals;
-};
-
-TileMesh.prototype.fourCorners = function fourCorners() {
-    return this.geometry.fourCorners;
-};
-
-TileMesh.prototype.normal = function normal() {
-    return this.geometry.normal;
-};
-
-TileMesh.prototype.center = function center() {
-    return this.geometry.center;
-};
-
 TileMesh.prototype.OBB = function OBB() {
-    return this.geometry.OBB;
+    return this.obb;
 };
 
 TileMesh.prototype.getIndexLayerColor = function getIndexLayerColor(idLayer) {
@@ -177,6 +184,9 @@ TileMesh.prototype.getIndexLayerColor = function getIndexLayerColor(idLayer) {
 };
 
 TileMesh.prototype.removeColorLayer = function removeColorLayer(idLayer) {
+    if (this.layerUpdateState && this.layerUpdateState[idLayer]) {
+        delete this.layerUpdateState[idLayer];
+    }
     this.material.removeColorLayer(idLayer);
 };
 
@@ -195,14 +205,29 @@ TileMesh.prototype.getCoordsForLayer = function getCoordsForLayer(layer) {
     if (layer.protocol.indexOf('wmts') == 0) {
         OGCWebServiceHelper.computeTileMatrixSetCoordinates(this, layer.options.tileMatrixSet);
         return this.wmtsCoords[layer.options.tileMatrixSet];
-    } else if (layer.protocol == 'tms') {
-        return OGCWebServiceHelper.computeTMSCoordinates(this, layer.extent);
+    } else if (layer.protocol == 'wms' && this.extent.crs() != layer.projection) {
+        if (layer.projection == 'EPSG:3857') {
+            const tilematrixset = 'PM';
+            OGCWebServiceHelper.computeTileMatrixSetCoordinates(this, tilematrixset);
+            return this.wmtsCoords[tilematrixset];
+        } else {
+            throw new Error('unsupported projection wms for this viewer');
+        }
+    } else if (layer.protocol == 'tms' || layer.protocol == 'xyz') {
+        // Special globe case: use the P(seudo)M(ercator) coordinates
+        if (this.extent.crs() === 'EPSG:4326' &&
+                (['EPSG:3857', 'EPSG:4326'].indexOf(layer.extent.crs()) >= 0)) {
+            OGCWebServiceHelper.computeTileMatrixSetCoordinates(this, 'PM');
+            return this.wmtsCoords.PM;
+        } else {
+            return OGCWebServiceHelper.computeTMSCoordinates(this, layer.extent, layer.origin);
+        }
     } else {
         return [this.extent];
     }
 };
 
-TileMesh.prototype.getZoomForLayer = function getCoordsForLayer(layer) {
+TileMesh.prototype.getZoomForLayer = function getZoomForLayer(layer) {
     if (layer.protocol.indexOf('wmts') == 0) {
         OGCWebServiceHelper.computeTileMatrixSetCoordinates(this, layer.options.tileMatrixSet);
         return this.wmtsCoords[layer.options.tileMatrixSet][0].zoom;

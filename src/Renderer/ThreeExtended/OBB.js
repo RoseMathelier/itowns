@@ -1,89 +1,57 @@
 import * as THREE from 'three';
 import Coordinates, { C, UNIT } from '../../Core/Geographic/Coordinates';
+import TileGeometry from '../../Core/TileGeometry';
+import BuilderEllipsoidTile from '../../Core/Prefab/Globe/BuilderEllipsoidTile';
 
-function OBB(min, max, lookAt, translate) {
+function OBB(min, max) {
     THREE.Object3D.call(this);
-    this.box3D = new THREE.Box3(min, max);
-
+    this.box3D = new THREE.Box3(min.clone(), max.clone());
     this.natBox = this.box3D.clone();
-
-    if (lookAt) {
-        this.lookAt(lookAt);
-    }
-
-
-    if (translate) {
-        this.translateX(translate.x);
-        this.translateY(translate.y);
-        this.translateZ(translate.z);
-    }
-
-    this.oPosition = new THREE.Vector3();
-
-    this.update();
-
-    this.oPosition = this.position.clone();
     this.z = { min: 0, max: 0 };
-}
-
-OBB.prototype = Object.create(THREE.Object3D.prototype);
-OBB.prototype.constructor = OBB;
-
-OBB.prototype.update = function update() {
-    this.updateMatrixWorld(true);
-
-    this.pointsWorld = this._cPointsWorld(this._points());
-};
-
-OBB.prototype.updateZ = function updateZ(min, max) {
-    this.z = { min, max };
-    return this.addHeight(min, max);
-};
-
-OBB.prototype.addHeight = function addHeight(minz, maxz) {
-    var depth = Math.abs(this.natBox.min.z - this.natBox.max.z);
-    //
-    this.box3D.min.z = this.natBox.min.z + minz;
-    this.box3D.max.z = this.natBox.max.z + maxz;
-
-    // TODO à vérifier --->
-
-    var nHalfSize = Math.abs(this.box3D.min.z - this.box3D.max.z) * 0.5;
-    var translaZ = this.box3D.min.z + nHalfSize;
-    this.box3D.min.z = -nHalfSize;
-    this.box3D.max.z = nHalfSize;
-
-    this.position.copy(this.oPosition);
-
-    this.translateZ(translaZ);
-
-    this.update();
-
-    return new THREE.Vector2(nHalfSize - depth * 0.5, translaZ);
-
-    // TODO <---- à vérifier
-};
-
-OBB.prototype._points = function _points() {
-    var points = [
-        new THREE.Vector3(),
-        new THREE.Vector3(),
-        new THREE.Vector3(),
-        new THREE.Vector3(),
+    this.topPointsWorld = [
         new THREE.Vector3(),
         new THREE.Vector3(),
         new THREE.Vector3(),
         new THREE.Vector3(),
     ];
+    this.update();
+}
 
+OBB.prototype = Object.create(THREE.Object3D.prototype);
+OBB.prototype.constructor = OBB;
+
+OBB.prototype.clone = function clone() {
+    const cOBB = new OBB(this.natBox.min, this.natBox.max);
+    cOBB.position.copy(this.position);
+    cOBB.quaternion.copy(this.quaternion);
+    return cOBB;
+};
+
+OBB.prototype.update = function update() {
+    this.updateMatrixWorld(true);
+    this._cPointsWorld(this._points(this.topPointsWorld));
+};
+
+OBB.prototype.updateZ = function updateZ(min, max) {
+    this.z = { min, max };
+    this.box3D.min.z = this.natBox.min.z + min;
+    this.box3D.max.z = this.natBox.max.z + max;
+    this.update();
+};
+
+OBB.prototype._points = function _points(points) {
+    // top points of bounding box
     points[0].set(this.box3D.max.x, this.box3D.max.y, this.box3D.max.z);
     points[1].set(this.box3D.min.x, this.box3D.max.y, this.box3D.max.z);
     points[2].set(this.box3D.min.x, this.box3D.min.y, this.box3D.max.z);
     points[3].set(this.box3D.max.x, this.box3D.min.y, this.box3D.max.z);
-    points[4].set(this.box3D.max.x, this.box3D.max.y, this.box3D.min.z);
-    points[5].set(this.box3D.min.x, this.box3D.max.y, this.box3D.min.z);
-    points[6].set(this.box3D.min.x, this.box3D.min.y, this.box3D.min.z);
-    points[7].set(this.box3D.max.x, this.box3D.min.y, this.box3D.min.z);
+    // bottom points of bounding box
+    if (points.length > 4) {
+        points[4].set(this.box3D.max.x, this.box3D.max.y, this.box3D.min.z);
+        points[5].set(this.box3D.min.x, this.box3D.max.y, this.box3D.min.z);
+        points[6].set(this.box3D.min.x, this.box3D.min.y, this.box3D.min.z);
+        points[7].set(this.box3D.max.x, this.box3D.min.y, this.box3D.min.z);
+    }
 
     return points;
 };
@@ -98,6 +66,25 @@ OBB.prototype._cPointsWorld = function _cPointsWorld(points) {
     return points;
 };
 
+/**
+ * Determines if the sphere is above the XY space of the box
+ *
+ * @param      {Sphere}   sphere  The sphere
+ * @return     {boolean}  True if sphere is above the XY space of the box, False otherwise.
+ */
+OBB.prototype.isSphereAboveXYBox = function isSphereAboveXYBox(sphere) {
+    const localSpherePosition = this.worldToLocal(sphere.position);
+    // get obb closest point to sphere center by clamping
+    const x = Math.max(this.box3D.min.x, Math.min(localSpherePosition.x, this.box3D.max.x));
+    const y = Math.max(this.box3D.min.y, Math.min(localSpherePosition.y, this.box3D.max.y));
+
+    // this is the same as isPointInsideSphere.position
+    const distance = Math.sqrt((x - localSpherePosition.x) * (x - localSpherePosition.x) +
+                           (y - localSpherePosition.y) * (y - localSpherePosition.y));
+
+    return distance < sphere.radius;
+};
+
 // Allocate these variables once and for all
 const tmp = {
     epsg4978: new Coordinates('EPSG:4978', 0, 0),
@@ -107,8 +94,8 @@ const tmp = {
     minV: new THREE.Vector3(),
     translate: new THREE.Vector3(),
     cardinal3D: new THREE.Vector3(),
-    planeZ: new THREE.Quaternion(),
-    qRotY: new THREE.Quaternion(),
+    transformNormalToZ: new THREE.Quaternion(),
+    alignTileOnWorldXY: new THREE.Quaternion(),
     tangentPlaneAtOrigin: new THREE.Plane(),
     zUp: new THREE.Vector3(0, 0, 1),
 };
@@ -118,84 +105,32 @@ for (let i = 0; i < 9; i++) {
 }
 
 // get oriented bounding box of tile
-OBB.extentToOBB = function extentToOBB(extent, minHeight = 0, maxHeight = 0) {
+const builder = new BuilderEllipsoidTile();
+OBB.extentToOBB = function _extentToOBB(extent, minHeight = 0, maxHeight = 0) {
     if (extent._crs != 'EPSG:4326') {
         throw new Error('The extent crs is not a Geographic Coordinates (EPSG:4326)');
     }
-
-    // Calcule the center world position with the extent.
-    extent.center(tmp.cardinals[8]);
-    const centerWorld = tmp.cardinals[8].as('EPSG:4978', tmp.epsg4978).xyz();
-    tmp.normal.copy(centerWorld).normalize();
-
-    const bboxDimension = extent.dimensions(UNIT.RADIAN);
-    const phiStart = extent.west(UNIT.RADIAN);
-    const phiLength = bboxDimension.x;
-
-    const thetaStart = extent.south(UNIT.RADIAN);
-    const thetaLength = bboxDimension.y;
-    //      0---1---2
-    //      |       |
-    //      7   8   3
-    //      |       |
-    //      6---5---4
-    tmp.cardinals[0]._values[0] = phiStart;
-    tmp.cardinals[0]._values[1] = thetaStart;
-    tmp.cardinals[1]._values[0] = phiStart + bboxDimension.x * 0.5;
-    tmp.cardinals[1]._values[1] = thetaStart;
-    tmp.cardinals[2]._values[0] = phiStart + phiLength;
-    tmp.cardinals[2]._values[1] = thetaStart;
-    tmp.cardinals[3]._values[0] = phiStart + phiLength;
-    tmp.cardinals[3]._values[1] = thetaStart + bboxDimension.y * 0.5;
-    tmp.cardinals[4]._values[0] = phiStart + phiLength;
-    tmp.cardinals[4]._values[1] = thetaStart + thetaLength;
-    tmp.cardinals[5]._values[0] = phiStart + bboxDimension.x * 0.5;
-    tmp.cardinals[5]._values[1] = thetaStart + thetaLength;
-    tmp.cardinals[6]._values[0] = phiStart;
-    tmp.cardinals[6]._values[1] = thetaStart + thetaLength;
-    tmp.cardinals[7]._values[0] = phiStart;
-    tmp.cardinals[7]._values[1] = thetaStart + bboxDimension.y * 0.5;
-
-    var cardin3DPlane = [];
-
-    tmp.maxV.set(-1000, -1000, -1000);
-    tmp.minV.set(1000, 1000, 1000);
-    var halfMaxHeight = 0;
-    tmp.tangentPlaneAtOrigin.set(tmp.normal, 0);
-
-    tmp.planeZ.setFromUnitVectors(tmp.normal, tmp.zUp);
-    tmp.qRotY.setFromAxisAngle(
-        new THREE.Vector3(0, 0, 1), -tmp.cardinals[8].longitude(UNIT.RADIAN));
-    tmp.qRotY.multiply(tmp.planeZ);
-
-    for (var i = 0; i < tmp.cardinals.length; i++) {
-        tmp.cardinals[i].as('EPSG:4978', tmp.epsg4978).xyz(tmp.cardinal3D);
-        cardin3DPlane.push(tmp.tangentPlaneAtOrigin.projectPoint(tmp.cardinal3D));
-        const d = cardin3DPlane[i].distanceTo(tmp.cardinal3D.sub(centerWorld));
-        halfMaxHeight = Math.max(halfMaxHeight, d * 0.5);
-        // compute tile's min/max
-        cardin3DPlane[i].applyQuaternion(tmp.qRotY);
-        tmp.maxV.max(cardin3DPlane[i]);
-        tmp.minV.min(cardin3DPlane[i]);
+    if (extent._internalStorageUnit != UNIT.RADIAN) {
+        throw new Error('The extent internalStorageUnit is not in radian unit');
     }
 
-    var halfLength = Math.abs(tmp.maxV.y - tmp.minV.y) * 0.5;
-    var halfWidth = Math.abs(tmp.maxV.x - tmp.minV.x) * 0.5;
+    const { sharableExtent, quaternion, position } = builder.computeSharableExtent(extent);
+    const paramsGeometry = {
+        extent: sharableExtent,
+        level: 0,
+        segment: 2,
+        disableSkirt: true,
+    };
 
-    const max = new THREE.Vector3(halfLength, halfWidth, halfMaxHeight);
-    const min = new THREE.Vector3(-halfLength, -halfWidth, -halfMaxHeight);
+    const geometry = new TileGeometry(paramsGeometry, builder);
+    const obb = geometry.OBB;
+    obb.updateZ(minHeight, maxHeight);
+    obb.position.copy(position);
+    obb.quaternion.copy(quaternion);
+    obb.update();
 
-    // delta is the distance between line `([6],[4])` and the point `[5]`
-    // These points [6],[5],[4] aren't aligned because of the ellipsoid shape
-    var delta = halfWidth - Math.abs(cardin3DPlane[5].x);
-    tmp.translate.set(0, delta, -halfMaxHeight);
-
-    var obb = new OBB(min, max, tmp.normal, tmp.translate);
-
-    // for 3D
-    if (minHeight !== 0 || maxHeight !== 0) {
-        obb.addHeight(minHeight, maxHeight);
-    }
+    // Calling geometry.dispose() is not needed since this geometry never gets rendered
     return obb;
 };
+
 export default OBB;

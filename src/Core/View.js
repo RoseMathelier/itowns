@@ -1,17 +1,12 @@
-/**
- * Generated On: 2015-10-5
- * Class: Scene
- * Description: La Scene est l'instance principale du client. Elle est le chef orchestre de l'application.
- */
-
-/* global window, requestAnimationFrame */
-import { Scene, EventDispatcher, Vector2 } from 'three';
+/* global window */
+import { Scene, EventDispatcher, Vector2, Object3D } from 'three';
 import Camera from '../Renderer/Camera';
 import MainLoop from './MainLoop';
 import c3DEngine from '../Renderer/c3DEngine';
 import { STRATEGY_MIN_NETWORK_TRAFFIC } from './Layer/LayerUpdateStrategy';
 import { GeometryLayer, Layer, defineLayerProperty } from './Layer/Layer';
 import Scheduler from './Scheduler/Scheduler';
+import Picking from './Picking';
 
 /**
  * Constructs an Itowns View instance
@@ -36,9 +31,9 @@ import Scheduler from './Scheduler/Scheduler';
  *
  * viewer.notifyChange(true);
  */
- /* TODO:
- * - remove debug boolean, replace by if __DEBUG__ and checkboxes in debug UI
- */
+ // TODO:
+ // - remove debug boolean, replace by if __DEBUG__ and checkboxes in debug UI
+ //
 function View(crs, viewerDiv, options = {}) {
     if (!viewerDiv) {
         throw new Error('Invalid viewerDiv parameter (must non be null/undefined)');
@@ -69,7 +64,7 @@ function View(crs, viewerDiv, options = {}) {
         this.mainLoop.gfxEngine.getWindowSize().y,
         options);
 
-    this._frameRequesters = [];
+    this._frameRequesters = { };
     this._layers = [];
 
     window.addEventListener('resize', () => {
@@ -80,23 +75,31 @@ function View(crs, viewerDiv, options = {}) {
         this.notifyChange(true);
     }, false);
 
-    this.onAfterRender = () => {};
-
     this._changeSources = new Set();
+
+    if (__DEBUG__) {
+        this.isDebugMode = true;
+    }
 }
 
 View.prototype = Object.create(EventDispatcher.prototype);
 View.prototype.constructor = View;
 
-const _syncThreejsLayer = function _syncThreejsLayer(layer, view) {
-    if (layer.visible) {
-        view.camera.camera3D.layers.enable(layer.threejsLayer);
-    } else {
-        view.camera.camera3D.layers.disable(layer.threejsLayer);
+const _syncGeometryLayerVisibility = function _syncGeometryLayerVisibility(layer, view) {
+    if (layer.object3d) {
+        layer.object3d.visible = layer.visible;
+    }
+
+    if (layer.threejsLayer) {
+        if (layer.visible) {
+            view.camera.camera3D.layers.enable(layer.threejsLayer);
+        } else {
+            view.camera.camera3D.layers.disable(layer.threejsLayer);
+        }
     }
 };
 
-function _preprocessLayer(view, layer, provider) {
+function _preprocessLayer(view, layer, provider, parentLayer) {
     if (!(layer instanceof Layer) && !(layer instanceof GeometryLayer)) {
         const nlayer = new Layer(layer.id);
         // nlayer.id is read-only so delete it from layer before Object.assign
@@ -105,6 +108,14 @@ function _preprocessLayer(view, layer, provider) {
         layer = Object.assign(nlayer, layer);
         // restore layer.id in user provider layer object
         tmp.id = layer.id;
+    }
+
+    layer.options = layer.options || {};
+    // TODO remove this warning and fallback after the release following v2.3.0
+    if (!layer.format && layer.options.mimetype) {
+        // eslint-disable-next-line no-console
+        console.warn('layer.options.mimetype is deprecated, please use layer.format');
+        layer.format = layer.options.mimetype;
     }
 
     if (!layer.updateStrategy) {
@@ -124,9 +135,16 @@ function _preprocessLayer(view, layer, provider) {
     }
 
     if (!layer.whenReady) {
+        if (layer.type == 'geometry' || layer.type == 'debug') {
+            if (!layer.object3d) {
+                // layer.threejsLayer *must* be assigned before preprocessing,
+                // because TileProvider.preprocessDataLayer function uses it.
+                layer.threejsLayer = view.mainLoop.gfxEngine.getUniqueThreejsLayer();
+            }
+        }
         let providerPreprocessing = Promise.resolve();
         if (provider && provider.preprocessDataLayer) {
-            providerPreprocessing = provider.preprocessDataLayer(layer, view, view.mainLoop.scheduler);
+            providerPreprocessing = provider.preprocessDataLayer(layer, view, view.mainLoop.scheduler, parentLayer);
             if (!(providerPreprocessing && providerPreprocessing.then)) {
                 providerPreprocessing = Promise.resolve();
             }
@@ -148,9 +166,36 @@ function _preprocessLayer(view, layer, provider) {
     } else if (layer.type == 'elevation') {
         defineLayerProperty(layer, 'frozen', false);
     } else if (layer.type == 'geometry' || layer.type == 'debug') {
-        layer.threejsLayer = view.mainLoop.gfxEngine.getUniqueThreejsLayer();
-        defineLayerProperty(layer, 'visible', true, () => _syncThreejsLayer(layer, view));
-        _syncThreejsLayer(layer, view);
+        defineLayerProperty(layer, 'visible', true, () => _syncGeometryLayerVisibility(layer, view));
+        _syncGeometryLayerVisibility(layer, view);
+
+        const changeOpacity = (o) => {
+            if (o.material) {
+                // != undefined: we want the test to pass if opacity is 0
+                if (o.material.opacity != undefined) {
+                    o.material.transparent = layer.opacity < 1.0;
+                    o.material.opacity = layer.opacity;
+                }
+                if (o.material.uniforms && o.material.uniforms.opacity != undefined) {
+                    o.material.transparent = layer.opacity < 1.0;
+                    o.material.uniforms.opacity.value = layer.opacity;
+                }
+            }
+        };
+        defineLayerProperty(layer, 'opacity', 1.0, () => {
+            if (layer.object3d) {
+                layer.object3d.traverse((o) => {
+                    if (o.layer !== layer.id) {
+                        return;
+                    }
+                    changeOpacity(o);
+                    // 3dtiles layers store scenes in children's content property
+                    if (o.content) {
+                        o.content.traverse(changeOpacity);
+                    }
+                });
+            }
+        });
     }
     return layer;
 }
@@ -161,7 +206,6 @@ function _preprocessLayer(view, layer, provider) {
  * @property {Attribution} attribution The intellectual property rights for the layer
  * @property {Object} extent Geographic extent of the service
  * @property {string} name
- * @property {string} mimetype
  */
 
 /**
@@ -171,7 +215,6 @@ function _preprocessLayer(view, layer, provider) {
  * @property {string} attribution.name The name of the owner of the data
  * @property {string} attribution.url The website of the owner of the data
  * @property {string} name
- * @property {string} mimetype
  * @property {string} tileMatrixSet
  * @property {Array.<Object>} tileMatrixSetLimits The limits for the tile matrix set
  * @property {number} tileMatrixSetLimits.minTileRow Minimum row for tiles at the level
@@ -198,6 +241,7 @@ function _preprocessLayer(view, layer, provider) {
  * @property {string} type the layer's type : 'color', 'elevation', 'geometry'
  * @property {string} protocol wmts and wms (wmtsc for custom deprecated)
  * @property {string} url Base URL of the repository or of the file(s) to load
+ * @property {string} format Format of this layer. See individual providers to check which formats are supported for a given layer type.
  * @property {NetworkOptions} networkOptions Options for fetching resources over network
  * @property {Object} updateStrategy strategy to load imagery files
  * @property {OptionsWmts|OptionsWms} options WMTS or WMS options
@@ -222,17 +266,17 @@ function _preprocessLayer(view, layer, provider) {
  * // Example to add an OPENSM Layer
  * view.addLayer({
  *   type: 'color',
- *   protocol:   'wmtsc',
+ *   protocol:   'xyz',
  *   id:         'OPENSM',
  *   fx: 2.5,
- *   customUrl:  'http://b.tile.openstreetmap.fr/osmfr/%TILEMATRIX/%COL/%ROW.png',
+ *   url:  'http://b.tile.openstreetmap.fr/osmfr/${z}/${x}/${y}.png',
+ *   format: 'image/png',
  *   options: {
  *       attribution : {
  *           name: 'OpenStreetMap',
  *           url: 'http://www.openstreetmap.org/',
  *       },
  *       tileMatrixSet: 'PM',
- *       mimetype: 'image/png',
  *    },
  * });
  *
@@ -259,7 +303,11 @@ View.prototype.addLayer = function addLayer(layer, parentLayer) {
         layer.extent = parentLayer.extent;
     }
 
-    layer = _preprocessLayer(this, layer, this.mainLoop.scheduler.getProtocolProvider(layer.protocol));
+    const provider = this.mainLoop.scheduler.getProtocolProvider(layer.protocol);
+    if (layer.protocol && !provider) {
+        throw new Error(`${layer.protocol} is not a recognized protocol name.`);
+    }
+    layer = _preprocessLayer(this, layer, provider, parentLayer);
     if (parentLayer) {
         parentLayer.attach(layer);
     } else {
@@ -271,6 +319,10 @@ View.prototype.addLayer = function addLayer(layer, parentLayer) {
         }
 
         this._layers.push(layer);
+    }
+
+    if (layer.object3d && !layer.object3d.parent && layer.object3d !== this.scene) {
+        this.scene.add(layer.object3d);
     }
 
     this.notifyChange(true);
@@ -324,48 +376,228 @@ View.prototype.getLayers = function getLayers(filter) {
 };
 
 /**
- * @typedef {object} FrameRequester
- * @property {Function(dt, updateLoopRestarted)} update - Method that will be called each
- * time the MainLoop updates. This function will be given as parameter the
- * delta (in ms) between this update and the previous one, and whether or not
- * we just started to render again. This update is considered as the "next"
- * update if view.notifyChange was called during a precedent update. If
- * view.notifyChange has been called by something else (other micro/macrotask,
- * UI events etc...), then this update is considered as being the "first".
+ * @name FrameRequester
+ * @function
  *
- * This means that if a FrameRequester.update function wants to animate
- * something, it should keep on calling view.notifyChange until its task is
- * done.
+ * @description
+ * Method that will be called each time the <code>MainLoop</code> updates. This
+ * function will be given as parameter the delta (in ms) between this update and
+ * the previous one, and whether or not we just started to render again. This
+ * update is considered as the "next" update if <code>view.notifyChange</code>
+ * was called during a precedent update. If <code>view.notifyChange</code> has
+ * been called by something else (other micro/macrotask, UI events etc...), then
+ * this update is considered as being the "first". It can also receive optional
+ * arguments, depending on the attach point of this function.  Currently only
+ * <code>BEFORE_LAYER_UPDATE / AFTER_LAYER_UPDATE</code> attach points provide
+ * an additional argument: the layer being updated.
+ * <br><br>
  *
- * Implementors of FrameRequester.update should keep in mind that this function
- * will be potentially called at each frame, thus care should be given about
- * performance.
+ * This means that if a <code>frameRequester</code> function wants to animate something, it
+ * should keep on calling <code>view.notifyChange</code> until its task is done.
+ * <br><br>
  *
- * Typical FrameRequesters are controls, module wanting to animate moves or UI
+ * Implementors of <code>frameRequester</code> should keep in mind that this
+ * function will be potentially called at each frame, thus care should be given
+ * about performance.
+ * <br><br>
+ *
+ * Typical frameRequesters are controls, module wanting to animate moves or UI
  * elements etc... Basically anything that would want to call
  * requestAnimationFrame.
+ *
+ * @param {number} dt
+ * @param {boolean} updateLoopRestarted
+ * @param {...*} args
  */
 /**
  * Add a frame requester to this view.
  *
  * FrameRequesters can activate the MainLoop update by calling view.notifyChange.
  *
- * @param {FrameRequester} frameRequester
- * @param {Function} frameRequester.update - update will be called at each
- * MainLoop update with the time delta between last update, or 0 if the
- * MainLoop has just been relaunched.
+ * @param {String} when - decide when the frameRequester should be called during
+ * the update cycle. Can be any of {@link MAIN_LOOP_EVENTS}.
+ * @param {FrameRequester} frameRequester - this function will be called at each
+ * MainLoop update with the time delta between last update, or 0 if the MainLoop
+ * has just been relaunched.
  */
-View.prototype.addFrameRequester = function addFrameRequester(frameRequester) {
-    this._frameRequesters.push(frameRequester);
+View.prototype.addFrameRequester = function addFrameRequester(when, frameRequester) {
+    if (typeof frameRequester !== 'function') {
+        throw new Error('frameRequester must be a function');
+    }
+
+    if (!this._frameRequesters[when]) {
+        this._frameRequesters[when] = [frameRequester];
+    } else {
+        this._frameRequesters[when].push(frameRequester);
+    }
 };
 
 /**
  * Remove a frameRequester.
  *
+ * @param {String} when - attach point of this requester. Can be any of
+ * {@link MAIN_LOOP_EVENTS}.
  * @param {FrameRequester} frameRequester
  */
-View.prototype.removeFrameRequester = function removeFrameRequester(frameRequester) {
-    this._frameRequesters.splice(this._frameRequesters.indexOf(frameRequester), 1);
+View.prototype.removeFrameRequester = function removeFrameRequester(when, frameRequester) {
+    this._frameRequesters[when].splice(this._frameRequesters[when].indexOf(frameRequester), 1);
+};
+
+/**
+ * Execute a frameRequester.
+ *
+ * @param {String} when - attach point of this (these) requester(s). Can be any
+ * of {@link MAIN_LOOP_EVENTS}.
+ * @param {Number} dt - delta between this update and the previous one
+ * @param {boolean} updateLoopRestarted
+ * @param {...*} args - optional arguments
+ */
+View.prototype.execFrameRequesters = function execFrameRequesters(when, dt, updateLoopRestarted, ...args) {
+    if (!this._frameRequesters[when]) {
+        return;
+    }
+
+    for (const frameRequester of this._frameRequesters[when]) {
+        if (frameRequester.update) {
+            frameRequester.update(dt, updateLoopRestarted, args);
+        } else {
+            frameRequester(dt, updateLoopRestarted, args);
+        }
+    }
+};
+
+const _eventCoords = new Vector2();
+/**
+ * Extract view coordinates from a mouse-event / touch-event
+ * @param {event} event - event can be a MouseEvent or a TouchEvent
+ * @param {number} touchIdx - finger index when using a TouchEvent (default: 0)
+ * @return {THREE.Vector2} - view coordinates (in pixels, 0-0 = top-left of the View)
+ */
+View.prototype.eventToViewCoords = function eventToViewCoords(event, touchIdx = 0) {
+    if (event.touches === undefined || !event.touches.length) {
+        return _eventCoords.set(event.offsetX, event.offsetY);
+    } else {
+        const br = this.mainLoop.gfxEngine.renderer.domElement.getBoundingClientRect();
+        return _eventCoords.set(
+            event.touches[touchIdx].clientX - br.x,
+            event.touches[touchIdx].clientY - br.y);
+    }
+};
+
+/**
+ * Extract normalized coordinates (NDC) from a mouse-event / touch-event
+ * @param {event} event - event can be a MouseEvent or a TouchEvent
+ * @param {number} touchIdx - finger index when using a TouchEvent (default: 0)
+ * @return {THREE.Vector2} - NDC coordinates (x and y are [-1, 1])
+ */
+View.prototype.eventToNormalizedCoords = function eventToNormalizedCoords(event, touchIdx = 0) {
+    return this.viewToNormalizedCoords(this.eventToViewCoords(event, touchIdx));
+};
+
+/**
+ * Convert view coordinates to normalized coordinates (NDC)
+ * @param {Vector2} viewCoords (in pixels, 0-0 = top-left of the View)
+ * @return {THREE.Vector2} - NDC coordinates (x and y are [-1, 1])
+ */
+View.prototype.viewToNormalizedCoords = function viewToNormalizedCoords(viewCoords) {
+    _eventCoords.x = 2 * (viewCoords.x / this.camera.width) - 1;
+    _eventCoords.y = -2 * (viewCoords.y / this.camera.height) + 1;
+    return _eventCoords;
+};
+
+/**
+ * Convert NDC coordinates to view coordinates
+ * @param {Vector2} ndcCoords
+ * @return {THREE.Vector2} - view coordinates (in pixels, 0-0 = top-left of the View)
+ */
+View.prototype.normalizedToViewCoords = function normalizedToViewCoords(ndcCoords) {
+    _eventCoords.x = (ndcCoords.x + 1) * 0.5 * this.camera.width;
+    _eventCoords.y = (ndcCoords.y - 1) * -0.5 * this.camera.height;
+    return _eventCoords;
+};
+
+function layerIdToLayer(view, layerId) {
+    const lookup = view.getLayers(l => l.id == layerId);
+    if (!lookup.length) {
+        throw new Error(`Invalid layer id used as where argument (value = ${layerId})`);
+    }
+    return lookup[0];
+}
+
+/**
+ * Return objects from some layers/objects3d under the mouse in this view.
+ *
+ * @param {Object} mouseOrEvt - mouse position in window coordinates (0, 0 = top-left)
+ * or MouseEvent or TouchEvent
+ * @param {...*} where - where to look for objects. Can be either: empty (= look
+ * in all layers with type == 'geometry'), layer ids or layers or a mix of all
+ * the above.
+ * @return {Array} - an array of objects. Each element contains at least an object
+ * property which is the Object3D under the cursor. Then depending on the queried
+ * layer/source, there may be additionnal properties (coming from THREE.Raycaster
+ * for instance).
+ *
+ * @example
+ * view.pickObjectsAt({ x, y })
+ * view.pickObjectsAt({ x, y }, 'wfsBuilding')
+ * view.pickObjectsAt({ x, y }, 'wfsBuilding', myLayer)
+ */
+View.prototype.pickObjectsAt = function pickObjectsAt(mouseOrEvt, ...where) {
+    const results = [];
+    const sources = where.length == 0 ?
+        this.getLayers(l => l.type == 'geometry') :
+        [...where];
+
+    const mouse = (mouseOrEvt.x === undefined) ?
+        this.eventToViewCoords(mouseOrEvt) : mouseOrEvt;
+
+    for (const source of sources) {
+        if (source instanceof GeometryLayer ||
+            source instanceof Layer ||
+            typeof (source) === 'string') {
+            const layer = (typeof (source) === 'string') ?
+                layerIdToLayer(this, source) :
+                source;
+
+            // does this layer have a custom picking function?
+            if (layer.pickObjectsAt) {
+                results.splice(
+                    results.length, 0,
+                    ...layer.pickObjectsAt(this, mouse));
+            } else {
+                //   - it hasn't: this layer is attached to another one
+                let parentLayer;
+                this.getLayers((l, p) => {
+                    if (l.id == layer.id) {
+                        parentLayer = p;
+                    }
+                });
+
+                // raycast using parent layer object3d
+                const obj = Picking.pickObjectsAt(
+                    this,
+                    mouse,
+                    parentLayer.object3d);
+
+                // then filter the results
+                for (const o of obj) {
+                    if (o.layer === layer.id) {
+                        results.push(o);
+                    }
+                }
+            }
+        } else if (source instanceof Object3D) {
+            Picking.pickObjectsAt(
+                this,
+                mouse,
+                source,
+                results);
+        } else {
+            throw new Error(`Invalid where arg (value = ${where}). Expected layers, layer ids or Object3Ds`);
+        }
+    }
+
+    return results;
 };
 
 export default View;

@@ -6,7 +6,7 @@
 
 
 import * as THREE from 'three';
-import { UNIT } from '../Geographic/Coordinates';
+import Coordinates, { UNIT } from '../Geographic/Coordinates';
 
 function Ellipsoid(size) {
     // Constructor
@@ -19,9 +19,21 @@ function Ellipsoid(size) {
     this.size = new THREE.Vector3(size.x, size.y, size.z);
 
     this._radiiSquared = new THREE.Vector3(size.x * size.x, size.y * size.y, size.z * size.z);
+
+    this._oneOverRadiiSquared = new THREE.Vector3(size.x === 0.0 ? 0.0 : 1.0 / (size.x * size.x),
+        size.y === 0.0 ? 0.0 : 1.0 / (size.y * size.y),
+        size.z === 0.0 ? 0.0 : 1.0 / (size.z * size.z));
 }
 
-Ellipsoid.prototype.geodeticSurfaceNormalCartographic = function geodeticSurfaceNormalCartographic(coordCarto) {
+Ellipsoid.prototype.geodeticSurfaceNormal = function geodeticSurfaceNormal(cartesian) {
+    var result = new THREE.Vector3(
+        cartesian.x() * this._oneOverRadiiSquared.x,
+        cartesian.y() * this._oneOverRadiiSquared.y,
+        cartesian.z() * this._oneOverRadiiSquared.z);
+    return result.normalize();
+};
+
+Ellipsoid.prototype.geodeticSurfaceNormalCartographic = function geodeticSurfaceNormalCartographic(coordCarto, target = new THREE.Vector3()) {
     var longitude = coordCarto.longitude(UNIT.RADIAN);
     var latitude = coordCarto.latitude(UNIT.RADIAN);
     var cosLatitude = Math.cos(latitude);
@@ -30,9 +42,7 @@ Ellipsoid.prototype.geodeticSurfaceNormalCartographic = function geodeticSurface
     var y = cosLatitude * Math.sin(longitude);
     var z = Math.sin(latitude);
 
-    var result = new THREE.Vector3(x, y, z);
-
-    return result.normalize();
+    return target.set(x, y, z);
 };
 
 Ellipsoid.prototype.setSize = function setSize(size) {
@@ -43,41 +53,30 @@ Ellipsoid.prototype.setSize = function setSize(size) {
     this._radiiSquared = new THREE.Vector3(size.x * size.x, size.y * size.y, size.z * size.z);
 };
 
+Ellipsoid.prototype.cartographicToCartesian = function cartographicToCartesian(coordCarto, target = new THREE.Vector3()) {
+    const n = coordCarto.geodesicNormal.clone();
 
-Ellipsoid.prototype.cartographicToCartesian = function cartographicToCartesian(coordCarto) {
-    // var n;
-    var k = new THREE.Vector3();
-    var n = this.geodeticSurfaceNormalCartographic(coordCarto);
+    target.multiplyVectors(this._radiiSquared, n);
 
-    k.multiplyVectors(this._radiiSquared, n);
+    const gamma = Math.sqrt(n.dot(target));
 
-    var gamma = Math.sqrt(n.dot(k));
-
-    k.divideScalar(gamma);
+    target.divideScalar(gamma);
 
     n.multiplyScalar(coordCarto.altitude());
 
-    // n.multiplyScalar(0.0);
-
-    return k.add(n);
+    return target.add(n);
 };
 
 /**
- * @typedef {Object} EllipsoidCoordinate
- * @property {number} latitude
- * @property {number} longitude
- * @property {number} h - height
- */
-/**
  * Convert cartesian coordinates to geographic according to the current ellipsoid of revolution.
- *
  * @param {Object} position - The coordinate to convert
  * @param {number} position.x
  * @param {number} position.y
  * @param {number} position.z
- * @returns {EllipsoidCoordinate} an object describing the coordinates on the reference ellipsoid, angles are in degree
+ * @param {Coordinate} [target] coordinate to copy result
+ * @returns {Coordinate} an object describing the coordinates on the reference ellipsoid, angles are in degree
  */
-Ellipsoid.prototype.cartesianToCartographic = function cartesianToCartographic(position) {
+Ellipsoid.prototype.cartesianToCartographic = function cartesianToCartographic(position, target = new Coordinates('EPSG:4326', 0, 0, 0)) {
     // for details, see for example http://www.linz.govt.nz/data/geodetic-system/coordinate-conversion/geodetic-datum-conversions/equations-used-datum
     // TODO the following is only valable for oblate ellipsoid of revolution. do we want to support triaxial ellipsoid?
     const R = Math.sqrt(position.x * position.x + position.y * position.y + position.z * position.z);
@@ -97,7 +96,7 @@ Ellipsoid.prototype.cartesianToCartographic = function cartesianToCartographic(p
 
     const h = (rsqXY * Math.cos(phi)) + position.z * Math.sin(phi) - a * Math.sqrt(1 - e * Math.sin(phi) * Math.sin(phi));
 
-    return { longitude: theta * 180 / Math.PI, latitude: phi * 180 / Math.PI, h };
+    return target.set('EPSG:4326', theta * 180 / Math.PI, phi * 180 / Math.PI, h);
 };
 
 Ellipsoid.prototype.cartographicToCartesianArray = function cartographicToCartesianArray(coordCartoArray) {

@@ -13,7 +13,7 @@ const vec4 CRed = vec4( 1.0, 0.0, 0.0, 1.0);
 
 
 uniform sampler2D   dTextures_01[TEX_UNITS];
-uniform vec3        offsetScale_L01[TEX_UNITS];
+uniform vec4        offsetScale_L01[TEX_UNITS];
 
 // offset texture | Projection | fx | Opacity
 uniform vec4        paramLayers[8];
@@ -34,6 +34,21 @@ varying vec2        vUv_WGS84;
 varying float       vUv_PM;
 varying vec3        vNormal;
 
+uniform float opacity;
+
+vec4 applyWhiteToInvisibleEffect(vec4 color, float intensity) {
+    float a = (color.r + color.g + color.b) * 0.333333333;
+    color.a *= 1.0 - pow(abs(a), intensity);
+    return color;
+}
+
+vec4 applyLightColorToInvisibleEffect(vec4 color, float intensity) {
+    float a = max(0.05,1.0 - length(color.xyz - CWhite.xyz));
+    color.a *= 1.0 - pow(abs(a), intensity);
+    color.rgb *= color.rgb * color.rgb;
+    return color;
+}
+
 #if defined(DEBUG)
     uniform bool showOutline;
     const float sLine = 0.008;
@@ -51,11 +66,11 @@ void main() {
         gl_FragColor = packDepthToRGBA(float(uuid) / (256.0 * 256.0 * 256.0));
     #elif defined(DEPTH_MODE)
         #if defined(USE_LOGDEPTHBUF) && defined(USE_LOGDEPTHBUF_EXT)
-            float z = 1.0/ gl_FragCoord.w ;
+            float z = gl_FragDepthEXT ;
         #else
-            float z = gl_FragCoord.z / gl_FragCoord.w;
+            float z = gl_FragCoord.z;
         #endif
-        gl_FragColor = packDepthToRGBA(z / 100000000.0);
+        gl_FragColor = packDepthToRGBA(z);
     #else
 
 
@@ -74,12 +89,13 @@ void main() {
 
         #if defined(USE_LOGDEPTHBUF) && defined(USE_LOGDEPTHBUF_EXT)
             float depth = gl_FragDepthEXT / gl_FragCoord.w;
-            float fogIntensity = 1.0/(exp(depth/distanceFog));
         #else
-            float fogIntensity = 1.0;
+            float depth = gl_FragCoord.z / gl_FragCoord.w;
         #endif
 
-        vec4 diffuseColor = CWhite;
+        float fogIntensity = 1.0/(exp(depth/distanceFog));
+
+        vec4 diffuseColor = vec4(noTextureColor, 1.0);
         bool validTexture = false;
 
         // TODO Optimisation des uv1 peuvent copier pas lignes!!
@@ -93,7 +109,19 @@ void main() {
 
                 if(paramsA.w > 0.0) {
                     bool projWGS84 = paramsA.y == 0.0;
+                    int pmTextureCount = int(paramsA.y);
                     int textureIndex = int(paramsA.x) + (projWGS84 ? 0 : pmSubTextureIndex);
+
+                    if (!projWGS84 && pmTextureCount <= pmSubTextureIndex) {
+                        continue;
+                    }
+
+                    #if defined(DEBUG)
+                    if (showOutline && !projWGS84 && (uvPM.x < sLine || uvPM.x > 1.0 - sLine || uvPM.y < sLine || uvPM.y > 1.0 - sLine)) {
+                        gl_FragColor = COrange;
+                        return;
+                    }
+                    #endif
 
                     /* if (0 <= textureIndex && textureIndex < loadedTexturesCount[1]) */ {
 
@@ -107,21 +135,24 @@ void main() {
                             textureIndex,
                             projWGS84 ? vUv_WGS84 : uvPM);
 
-                        if (layerColor.a > 0.0) {
+                        if (layerColor.a > 0.0 && paramsA.w > 0.0) {
                             validTexture = true;
-                            float lum = 1.0;
-
-                            if(paramsA.z > 0.0) {
-                                float a = max(0.05,1.0 - length(layerColor.xyz-CWhite.xyz));
-                                if(paramsA.z > 2.0) {
-                                    a = (layerColor.r + layerColor.g + layerColor.b)*0.333333333;
-                                    layerColor*= layerColor*layerColor;
-                                }
-                                lum = 1.0-pow(abs(a),paramsA.z);
+                            if(paramsA.z > 2.0) {
+                                layerColor.rgb /= layerColor.a;
+                                layerColor = applyLightColorToInvisibleEffect(layerColor, paramsA.z);
+                                layerColor.rgb *= layerColor.a;
+                            } else if(paramsA.z > 0.0) {
+                                layerColor.rgb /= layerColor.a;
+                                layerColor = applyWhiteToInvisibleEffect(layerColor, paramsA.z);
+                                layerColor.rgb *= layerColor.a;
                             }
 
-                            diffuseColor = mix( diffuseColor,layerColor, lum*paramsA.w * layerColor.a);
-
+                            // Use premultiplied-alpha blending formula because source textures are either:
+                            //     - fully opaque (layer.transparent = false)
+                            //     - or use premultiplied alpha (texture.premultiplyAlpha = true)
+                            // Note: using material.premultipliedAlpha doesn't make sense since we're manually blending
+                            // the multiple colors in the shader.
+                            diffuseColor = diffuseColor * (1.0 - layerColor.a * paramsA.w) + layerColor * paramsA.w;
                         }
                     }
                 }
@@ -147,5 +178,6 @@ void main() {
             gl_FragColor.rgb *= light;
         }
     }
+    gl_FragColor.a = opacity;
     #endif
 }

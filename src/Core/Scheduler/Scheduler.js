@@ -12,7 +12,9 @@ import $3dTiles_Provider from './Providers/3dTiles_Provider';
 import TMS_Provider from './Providers/TMS_Provider';
 import PointCloudProvider from './Providers/PointCloudProvider';
 import WFS_Provider from './Providers/WFS_Provider';
-// import ROS_Provider from './Providers/ROS_Provider';
+import Raster_Provider from './Providers/Raster_Provider';
+import StaticProvider from './Providers/StaticProvider';
+import CancelledCommandException from './CancelledCommandException';
 
 var instanceScheduler = null;
 
@@ -56,6 +58,10 @@ function _instanciateQueue() {
                 this.counters.executing--;
                 cmd.reject(err);
                 this.counters.failed++;
+                if (__DEBUG__ && this.counters.failed < 3) {
+                    // eslint-disable-next-line no-console
+                    console.error(err);
+                }
             });
         },
     };
@@ -83,18 +89,18 @@ Scheduler.prototype.constructor = Scheduler;
 
 Scheduler.prototype.initDefaultProviders = function initDefaultProviders() {
     // Register all providers
-    var wmtsProvider = new WMTS_Provider();
-    this.addProtocolProvider('wmts', wmtsProvider);
-    this.addProtocolProvider('wmtsc', wmtsProvider);
-    this.addProtocolProvider('tile', new TileProvider());
-    this.addProtocolProvider('wms', new WMS_Provider());
-    this.addProtocolProvider('3d-tiles', new $3dTiles_Provider());
-    this.addProtocolProvider('tms', new TMS_Provider());
+    this.addProtocolProvider('wmts', WMTS_Provider);
+    this.addProtocolProvider('wmtsc', WMTS_Provider);
+    this.addProtocolProvider('tile', TileProvider);
+    this.addProtocolProvider('wms', WMS_Provider);
+    this.addProtocolProvider('3d-tiles', $3dTiles_Provider);
+    this.addProtocolProvider('tms', TMS_Provider);
+    this.addProtocolProvider('xyz', TMS_Provider);
     this.addProtocolProvider('potreeconverter', PointCloudProvider);
-    this.addProtocolProvider('wfs', new WFS_Provider());
-  //  this.addProtocolProvider('ros', ROS_Provider);
+    this.addProtocolProvider('wfs', WFS_Provider);
+    this.addProtocolProvider('rasterizer', Raster_Provider);
+    this.addProtocolProvider('static', StaticProvider);
 };
-
 
 Scheduler.prototype.runCommand = function runCommand(command, queue, executingCounterUpToDate) {
     var provider = this.providers[command.layer.protocol];
@@ -123,8 +129,7 @@ Scheduler.prototype.execute = function execute(command) {
 
     // parse host
     const layer = command.layer;
-
-    const host = layer.url ? new URL(layer.url).host : undefined;
+    const host = layer.url ? new URL(layer.url, document.location).host : undefined;
 
     command.promise = new Promise((resolve, reject) => {
         command.resolve = resolve;
@@ -143,13 +148,11 @@ Scheduler.prototype.execute = function execute(command) {
         // increment before
         q.counters.executing++;
 
-        var runNow = function runNow() {
-            this.runCommand(command, q, true);
-        }.bind(this);
-
         // We use a setTimeout to defer processing but we avoid the
         // queue mechanism (why setTimeout and not Promise? see tasks vs microtasks priorities)
-        window.setTimeout(runNow, 0);
+        window.setTimeout(() => {
+            this.runCommand(command, q, true);
+        }, 0);
     } else {
         command.timestamp = Date.now();
         q.storage.queue(command);
@@ -158,8 +161,14 @@ Scheduler.prototype.execute = function execute(command) {
     return command.promise;
 };
 
-
 Scheduler.prototype.addProtocolProvider = function addProtocolProvider(protocol, provider) {
+    if (typeof (provider.executeCommand) !== 'function') {
+        throw new Error(`Can't add provider for ${protocol}: missing a executeCommand function.`);
+    }
+    if (typeof (provider.preprocessDataLayer) !== 'function') {
+        throw new Error(`Can't add provider for ${protocol}: missing a preprocessDataLayer function.`);
+    }
+
     this.providers[protocol] = provider;
 };
 
@@ -198,19 +207,6 @@ Scheduler.prototype.getProviders = function getProviders() {
     return this.providers.slice();
 };
 
-/**
- * Custom error thrown when cancelling commands. Allows the caller to act differently if needed.
- * @constructor
- * @param {Command} command
- */
-function CancelledCommandException(command) {
-    this.command = command;
-}
-
-CancelledCommandException.prototype.toString = function toString() {
-    return `Cancelled command ${this.command.requester.id}/${this.command.layer.id}`;
-};
-
 Scheduler.prototype.deQueue = function deQueue(queue) {
     var st = queue.storage;
     while (st.length > 0) {
@@ -227,5 +223,4 @@ Scheduler.prototype.deQueue = function deQueue(queue) {
     return undefined;
 };
 
-export { CancelledCommandException };
 export default Scheduler;

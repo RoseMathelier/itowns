@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import Coordinates from '../Core/Geographic/Coordinates';
+import DEMUtils from '../utils/DEMUtils';
 
 function Camera(crs, width, height, options = {}) {
     Object.defineProperty(this, 'crs', { get: () => crs });
@@ -24,8 +25,9 @@ function resize(camera, width, height) {
         camera.camera3D.aspect = ratio;
         if (camera.camera3D.isOrthographicCamera) {
             const halfH = (camera.camera3D.right - camera.camera3D.left) * 0.5 / ratio;
-            camera.camera3D.top = halfH;
-            camera.camera3D.bottom = -halfH;
+            const y = (camera.camera3D.top + camera.camera3D.bottom) * 0.5;
+            camera.camera3D.top = y + halfH;
+            camera.camera3D.bottom = y - halfH;
         }
     }
 
@@ -68,14 +70,55 @@ const tmp = {
     box3: new THREE.Box3(),
 };
 
-Camera.prototype.isBox3Visible = function isBox3Visible(box3, matrixWorld) {
+const points = [
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+];
+
+function projectBox3PointsInCameraSpace(camera, box3, matrixWorld) {
+    // Projects points in camera space
+    // We don't project directly on screen to avoid artifacts when projecting
+    // points behind the near plane.
+    let m = camera.camera3D.matrixWorldInverse;
     if (matrixWorld) {
-        tmp.matrix.multiplyMatrices(this._viewMatrix, matrixWorld);
-        tmp.frustum.setFromMatrix(tmp.matrix);
-    } else {
-        tmp.frustum.setFromMatrix(this._viewMatrix);
+        m = tmp.matrix.multiplyMatrices(camera.camera3D.matrixWorldInverse, matrixWorld);
     }
-    return tmp.frustum.intersectsBox(box3);
+    points[0].set(box3.min.x, box3.min.y, box3.min.z).applyMatrix4(m);
+    points[1].set(box3.min.x, box3.min.y, box3.max.z).applyMatrix4(m);
+    points[2].set(box3.min.x, box3.max.y, box3.min.z).applyMatrix4(m);
+    points[3].set(box3.min.x, box3.max.y, box3.max.z).applyMatrix4(m);
+    points[4].set(box3.max.x, box3.min.y, box3.min.z).applyMatrix4(m);
+    points[5].set(box3.max.x, box3.min.y, box3.max.z).applyMatrix4(m);
+    points[6].set(box3.max.x, box3.max.y, box3.min.z).applyMatrix4(m);
+    points[7].set(box3.max.x, box3.max.y, box3.max.z).applyMatrix4(m);
+
+    // In camera space objects are along the -Z axis
+    // So if min.z is > -near, the object is invisible
+    let atLeastOneInFrontOfNearPlane = false;
+    for (let i = 0; i < 8; i++) {
+        if (points[i].z <= -camera.camera3D.near) {
+            atLeastOneInFrontOfNearPlane = true;
+        } else {
+            // Clamp to near plane
+            points[i].z = -camera.camera3D.near;
+        }
+    }
+
+    return atLeastOneInFrontOfNearPlane ? points : undefined;
+}
+
+const ndcBox3 = new THREE.Box3(
+    new THREE.Vector3(-1, -1, -1),
+    new THREE.Vector3(1, 1, 1));
+
+Camera.prototype.isBox3Visible = function isBox3Visible(box3, matrixWorld) {
+    return this.box3SizeOnScreen(box3, matrixWorld).intersectsBox(ndcBox3);
 };
 
 Camera.prototype.isSphereVisible = function isSphereVisible(sphere, matrixWorld) {
@@ -89,15 +132,44 @@ Camera.prototype.isSphereVisible = function isSphereVisible(sphere, matrixWorld)
 };
 
 Camera.prototype.box3SizeOnScreen = function box3SizeOnScreen(box3, matrixWorld) {
-    tmp.box3.copy(box3);
+    const pts = projectBox3PointsInCameraSpace(this, box3, matrixWorld);
 
-    if (matrixWorld) {
-        tmp.matrix.multiplyMatrices(this._viewMatrix, matrixWorld);
-        tmp.box3.applyMatrix4(tmp.matrix);
-    } else {
-        tmp.box3.applyMatrix4(this._viewMatrix);
+    // All points are in front of the near plane -> box3 is invisible
+    if (!pts) {
+        return tmp.box3.makeEmpty();
     }
-    return tmp.box3;
+
+    // Project points on screen
+    for (let i = 0; i < 8; i++) {
+        pts[i].applyMatrix4(this.camera3D.projectionMatrix);
+    }
+
+    return tmp.box3.setFromPoints(pts);
+};
+
+ /**
+ * Test for collision between camera and a geometry layer (DTM/DSM) to adjust camera position
+ * It could be modified later to handle an array of geometry layers
+ * TODO Improve Coordinates class to handle altitude for any coordinate system (even projected one)
+ * @param {view} view where we test the collision between geometry layers and the camera
+ * @param {elevationLayer} elevationLayer (DTM/DSM) used to test the collision with the camera. Could be another geometry layer
+ * @param {minDistanceCollision} minDistanceCollision the minimum distance allowed between the camera and the surface
+ */
+Camera.prototype.adjustAltitudeToAvoidCollisionWithLayer = function adjustAltitudeToAvoidCollisionWithLayer(view, elevationLayer, minDistanceCollision) {
+    // We put the camera location in geographic by default to easily handle altitude. (Should be improved in Coordinates class for all ref)
+    const camLocation = view.camera.position().as('EPSG:4326');
+    if (elevationLayer !== undefined) {
+        const elevationUnderCamera = DEMUtils.getElevationValueAt(elevationLayer, camLocation);
+        if (elevationUnderCamera != undefined) {
+            const difElevation = camLocation.altitude() - (elevationUnderCamera.z + minDistanceCollision);
+            // We move the camera to avoid collisions if too close to terrain
+            if (difElevation < 0) {
+                camLocation.setAltitude(elevationUnderCamera.z + minDistanceCollision);
+                view.camera.camera3D.position.copy(camLocation.as(view.referenceCrs).xyz());
+                view.notifyChange(true);
+            }
+        }
+    }
 };
 
 export default Camera;

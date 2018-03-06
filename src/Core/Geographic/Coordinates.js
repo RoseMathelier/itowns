@@ -9,6 +9,8 @@ import proj4 from 'proj4';
 import mE from '../Math/MathExtended';
 import Ellipsoid from '../Math/Ellipsoid';
 
+proj4.defs('EPSG:4978', '+proj=geocent +datum=WGS84 +units=m +no_defs');
+
 const projectionCache = {};
 
 export function ellipsoidSizes() {
@@ -110,6 +112,7 @@ function instanceProj4(crsIn, crsOut) {
 }
 
 // Only support explicit conversions
+const cartesian = new THREE.Vector3();
 function _convert(coordsIn, newCrs, target) {
     target = target || new Coordinates(newCrs, 0, 0);
     if (newCrs === coordsIn.crs) {
@@ -134,22 +137,58 @@ function _convert(coordsIn, newCrs, target) {
         }
     } else {
         if (coordsIn.crs === 'EPSG:4326' && newCrs === 'EPSG:4978') {
-            const cartesian = ellipsoid.cartographicToCartesian(coordsIn);
-            return target.set(newCrs, cartesian);
+            ellipsoid.cartographicToCartesian(coordsIn, cartesian);
+            target.set(newCrs, cartesian);
+            target._normal = coordsIn.geodesicNormal;
+            return target;
         }
 
         if (coordsIn.crs === 'EPSG:4978' && newCrs === 'EPSG:4326') {
-            const geo = ellipsoid.cartesianToCartographic({
+            ellipsoid.cartesianToCartographic({
                 x: coordsIn._values[0],
                 y: coordsIn._values[1],
                 z: coordsIn._values[2],
-            });
-            return target.set(newCrs, geo.longitude, geo.latitude, geo.h);
+            }, target);
+            return target;
         }
 
         if (coordsIn.crs in proj4.defs && newCrs in proj4.defs) {
-            const p = instanceProj4(coordsIn.crs, newCrs).forward([coordsIn._values[0], coordsIn._values[1]]);
-            return target.set(newCrs, p[0], p[1], coordsIn._values[2]);
+            let val0 = coordsIn._values[0];
+            let val1 = coordsIn._values[1];
+
+            // Verify that coordinates are stored in reference unit.
+            const refUnit = crsToUnit(coordsIn.crs);
+            if (coordsIn._internalStorageUnit != coordsIn.crs) {
+                if (coordsIn._internalStorageUnit == UNIT.DEGREE && refUnit == UNIT.RADIAN) {
+                    val0 = coordsIn.longitude(UNIT.RADIAN);
+                    val1 = coordsIn.latitude(UNIT.RADIAN);
+                } else if (coordsIn._internalStorageUnit == UNIT.RADIAN && refUnit == UNIT.DEGREE) {
+                    val0 = coordsIn.longitude(UNIT.DEGREE);
+                    val1 = coordsIn.latitude(UNIT.DEGREE);
+                }
+            }
+
+            // there is a bug for converting anything from and to 4978 with proj4
+            // https://github.com/proj4js/proj4js/issues/195
+            // the workaround is to use an intermediate projection, like EPSG:4326
+            if (newCrs == 'EPSG:4978') {
+                const p = instanceProj4(coordsIn.crs, 'EPSG:4326').forward([val0, val1]);
+                target.set('EPSG:4326', p[0], p[1], coordsIn._values[2]);
+                return target.as('EPSG:4978');
+            } else if (coordsIn.crs === 'EPSG:4978') {
+                coordsIn.as('EPSG:4326', target);
+                const p = instanceProj4(target.crs, newCrs).forward([target._values[0], target._values[1]]);
+                target.set(newCrs, p[0], p[1], target._values[2]);
+                return target;
+            } else if (coordsIn.crs == 'EPSG:4326' && newCrs == 'EPSG:3857') {
+                val1 = THREE.Math.clamp(val1, -89.999999, 89.999999);
+                const p = instanceProj4(coordsIn.crs, newCrs).forward([val0, val1]);
+                return target.set(newCrs, p[0], p[1], coordsIn._values[2]);
+            } else {
+                // here is the normal case with proj4
+                const p = instanceProj4(coordsIn.crs, newCrs).forward([val0, val1]);
+                return target.set(newCrs, p[0], p[1], coordsIn._values[2]);
+            }
         }
 
         throw new Error(`Cannot convert from crs ${coordsIn.crs} (unit=${coordsIn._internalStorageUnit}) to ${newCrs}`);
@@ -192,6 +231,29 @@ export function convertValueToUnit(unitIn, unitOut, value) {
 function Coordinates(crs, ...coordinates) {
     this._values = new Float64Array(3);
     this.set(crs, ...coordinates);
+
+    Object.defineProperty(this, 'geodesicNormal',
+        {
+            configurable: true,
+            get: () => {
+                this._normal = this._normal || computeGeodesicNormal(this);
+                return this._normal;
+            },
+        });
+}
+
+const planarNormal = new THREE.Vector3(0, 0, 1);
+
+function computeGeodesicNormal(coord) {
+    if (coord.crs == 'EPSG:4326') {
+        return ellipsoid.geodeticSurfaceNormalCartographic(coord);
+    }
+    // In globe mode (EPSG:4978), we compute the normal.
+    if (coord.crs == 'EPSG:4978') {
+        return ellipsoid.geodeticSurfaceNormal(coord);
+    }
+    // In planar mode, normal is the up vector.
+    return planarNormal;
 }
 
 Coordinates.prototype.set = function set(crs, ...coordinates) {
@@ -210,6 +272,7 @@ Coordinates.prototype.set = function set(crs, ...coordinates) {
             this._values[i] = 0;
         }
     }
+    this._normal = undefined;
     this._internalStorageUnit = crsToUnit(crs);
     return this;
 };
@@ -221,6 +284,9 @@ Coordinates.prototype.clone = function clone(target) {
         r = target;
     } else {
         r = new Coordinates(this.crs, ...this._values);
+    }
+    if (this._normal) {
+        r._normal = this._normal.clone();
     }
     r._internalStorageUnit = this._internalStorageUnit;
     return r;

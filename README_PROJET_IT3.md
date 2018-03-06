@@ -101,12 +101,9 @@ Ce menu de messages est obtenu en récupérant le flux de données issus de la w
 
 Les messages actuellement pris en compte par l'application sont : 
 - tf2_msgs/TFMessage : données de base sur les différents repères. Il est nécessaire de le cocher avant tout traitement.
-- sensor_msgs/NavSatFix : données de position du porteur     
-    --> Affiche une ligne rouge suivant les coordonnées au cours du temps
-- geometry_msgs/PoseWithCovarianceStamped : données de position des caméras     
-    --> Affiche des carrés qui représente la caméra 
-- sensor_msgs/PointCloud2 : nuage de points récupéré par les équipements de mesure (n'est pas fonctionnel)   
-    --> Est supposé afficher un nuage de point représentant les données scannées. Ces points ne sont pas visibles bien qu'ils soient présents dans la scène finale (visible grâce à la commande `console.log(view.scene`). 
+- sensor_msgs/NavSatFix : données de position du porteur - *affiche une ligne rouge suivant les coordonnées au cours du temps*
+- geometry_msgs/PoseWithCovarianceStamped : données de position des caméras - *affiche des carrés qui représente la caméra*
+- sensor_msgs/PointCloud2 : nuage de points récupéré par les équipements de mesure (n'est pas fonctionnel) - *est supposé afficher un nuage de point représentant les données scannées. Ces points ne sont pas visibles bien qu'ils soient présents dans la scène finale (visible grâce à la commande `console.log(view.scene)`).* 
 
 ## Problèmes rencontrés
 
@@ -136,7 +133,8 @@ Par exemple pour la lecture des sensor_msgs/Camerainfo, il n'y avait aucune indi
 En l'état actuel le projet n'est pas terminé. En effet, le problème de l'affichage des points n'ayant pas été résolu nous n'avons pas pu poursuivre le traitement des données.     
 Nous avons donc réalisé l'implémentation jusqu'à l'étape des tests d'affichage des données (en local). L'étape suivante (une fois le bug corrigé) serait alors de mettre toutes les données dans un repère unique grâce aux messages récupérés dans /tf puis de visualiser ces éléments dans itowns.    
        
-De plus, ce projet ne nous a pas permis de passer beaucoup de temps sur les problématiques directement liées à la 3D et à son traitement sur iTowns, les erreurs en amont étant trop importantes. Ainsi, une majorité du temps de projet a été consacrée à la compréhension de la structure des données ROS et des librairies associées pour le développement en javascript, mais également à la correction des erreurs de celles-ci.    
+De plus, ce projet ne nous a pas permis de passer beaucoup de temps sur les problématiques directement liées à la 3D et à son traitement sur iTowns, les erreurs en amont étant trop importantes. Ainsi, une majorité du temps de projet a été consacrée à la compréhension de la structure des données ROS et des librairies associées pour le développement en javascript, mais également à la correction des erreurs de celles-ci.   
+   
 Cependant, nous avons pu rendre fonctionnelle la librairie ROS3Djs et l'utiliser correctement dans notre code, et construire plusieurs gestionnaires pour une partie des messages. En outre, le code actuel peut facilement être complété avec d'autres  gestionnaires, en rajoutant simplement les fonctions nécessaires. Chaque message disponible est en effet détecté et apparaît automatiquement dans le menu utilisateur.
 
 **[Retour en haut de la page](#table-des-matières)** 

@@ -22,7 +22,7 @@ Seulement la surcouche webGL d'iTowns n'est pas compatible avec le surcouche web
 
 ## Installation sur ubuntu
 
-### itowns
+### iTowns
 On peut trouver l'ensemble du projet itowns à l'adresse suivante : https://github.com/iTowns/itowns/tree/ros         
 
 

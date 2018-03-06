@@ -102,9 +102,13 @@ Ce menu de messages est obtenu en récupérant le flux de données issus de la w
 
 Les messages actuellement pris en compte par l'application sont : 
 - tf2_msgs/TFMessage : données de base sur les différents repères. Il est nécessaire de le cocher avant tout traitement.
-- sensor_msgs/NavSatFix : données de position du porteur 
-- sensor_msgs/Camerainfo : données de position des caméras 
-- sensor_msgs/PointCloud2 : nuage de points récupéré par les équipements de mesure (n'est pas fonctionnel)
+- sensor_msgs/NavSatFix : données de position du porteur     
+    --> Affiche une ligne rouge suivant les coordonnées au cours du temps
+- sensor_msgs/Camerainfo : données de position des caméras     
+    --> Affiche des carrés qui représente la caméra 
+- sensor_msgs/PointCloud2 : nuage de points récupéré par les équipements de mesure (n'est pas fonctionnel)   
+    --> Est supposé afficher un nuage de point représentant les données scannées
+- geometry_msgs/PoseWithCovarianceStamped : ?? 
 
 ## Problèmes rencontrés
 

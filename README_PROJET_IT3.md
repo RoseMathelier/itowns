@@ -58,12 +58,35 @@ L'implémentation comprend plusieurs étapes :
 
 ## Lancement de l'acquisiton
 
+### Initialisation de l'environnement
+
+Il est tout d'abord primordial d'entrer la commande suivante dans chacun des terminaux que nous utiliserons.
+```
+source /opt/ros/kinetic/setup.bash
+```
+Cette ligne de commande permet en effet de configurer l'environnement ROS de travail. 
+
 ### Lancement du serveur
-.. to do ..
+
+Pour lancer le serveur websocket de ROS il faut entrer la commande suivante dans un terminal indépendant : 
+```
+roslaunch rosbridge_server rosbridge_websocket.launch
+```
+Cette commande permet de créer la connexion entre la websocket de ROS et le Bridge (proxy).        
+L'écoute des données s'effectue en local sur le port 9090. 
 
 ### Lancement du RosBag de test
-.. to do ..
 
+Afin de produire un flux de données utiles, on utilise un document BAG.    
+Dans un nouveau terminal, on lance la lecture du document en utilisant la commande suivante : 
+```
+rosbag play -l  LIEN VERS LE DOCUMENT BAG
+```
+L'option -l permet de faire tourner le document en boucle pour effectuer nos tests sur un document qui contient peu de données et qui est donc plus facilement portable. 
+
+### Recupération des données 
+Une fois ces opérations terminées, il est possible de récupérer les données dans le document source en javascript 
+?????
 
 **[Retour en haut de la page](#table-des-matières)** 
 
@@ -78,10 +101,10 @@ Ce menu de messages est obtenu en récupérant le flux de données issus de la w
 ### Visualisation des résultats
 
 Les messages actuellement pris en compte par l'application sont : 
-- tf : données de base sur les différents repères. Il est nécessaire de le cocher avant tout traitement.
-- Navsatfix : données de position du porteur 
-- camera : données de position des caméras 
-- Pointcloud : nuage de points récupéré par les équipements de mesure (n'est pas fonctionnel)
+- tf2_msgs/TFMessage : données de base sur les différents repères. Il est nécessaire de le cocher avant tout traitement.
+- sensor_msgs/NavSatFix : données de position du porteur 
+- sensor_msgs/Camerainfo : données de position des caméras 
+- sensor_msgs/PointCloud2 : nuage de points récupéré par les équipements de mesure (n'est pas fonctionnel)
 
 ## Problèmes rencontrés
 

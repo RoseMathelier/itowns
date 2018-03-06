@@ -85,7 +85,7 @@ rosbag play -l  LIEN VERS LE DOCUMENT BAG
 L'option -l permet de faire tourner le document en boucle pour effectuer nos tests sur un document qui contient peu de données et qui est donc plus facilement portable. 
 
 ### Recupération des données 
-Une fois ces opérations terminées, il est possible de récupérer les données dans le document source en javascript 
+Une fois ces opérations terminées, il est possible de récupérer les données dans le document source en javascript       
 ?????
 
 **[Retour en haut de la page](#table-des-matières)** 
@@ -111,6 +111,9 @@ Les messages actuellement pris en compte par l'application sont :
 ### Librairie ROS3Djs non fonctionnelle
 
 ... to do ... (le problème rencontré + solution proposée)
+Problème d'obsolescence pour .. 
+2 options s'offraint à nous : recréer la fonction point cloud2 sur ros3D ou essayer de modifier la bibiotheque
+On a modifié la bibiothèque en faisant .. 
 
 
 ### Outils de developpement compliqué à manipuler
